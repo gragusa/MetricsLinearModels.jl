@@ -8,12 +8,20 @@
 struct FixedEffectModel <: RegressionModel
     coef::Vector{Float64}   # Vector of coefficients
     vcov::Matrix{Float64}   # Covariance matrix
-    vcov_type::CovarianceEstimator
+    vcov_type::Any  # CovarianceEstimator (Vcov.jl, deprecated) or AbstractAsymptoticVarianceEstimator (CovarianceMatrices.jl)
     nclusters::Union{NamedTuple, Nothing}
 
     esample::BitVector      # Is the row of the original dataframe part of the estimation sample?
     residuals::Union{AbstractVector, Nothing}
     fe::DataFrame
+
+    # Post-estimation data for CovarianceMatrices.jl
+    X::Union{Matrix{Float64}, Nothing}                    # Design matrix (Xhat for IV)
+    Xhat::Union{Matrix{Float64}, Nothing}                 # IV: projected matrix, OLS: nothing
+    crossx::Union{Cholesky{Float64, Matrix{Float64}}, Nothing}  # Cholesky(X'X)
+    invXX::Union{Symmetric{Float64, Matrix{Float64}}, Nothing}  # (X'X)^-1
+    cluster_vars::NamedTuple                              # Stored cluster variables (subsetted to esample)
+
     fekeys::Vector{Symbol}
 
 
@@ -63,6 +71,345 @@ StatsAPI.rss(m::FixedEffectModel) = m.rss
 StatsAPI.mss(m::FixedEffectModel) = nulldeviance(m) - rss(m)
 StatsModels.formula(m::FixedEffectModel) = m.formula_schema
 dof_fes(m::FixedEffectModel) = m.dof_fes
+
+##############################################################################
+##
+## CovarianceMatrices.jl Interface for Post-Estimation vcov
+##
+##############################################################################
+
+"""
+    CovarianceMatrices.momentmatrix(m::FixedEffectModel)
+
+Returns the moment matrix for the model (X .* residuals).
+Required for post-estimation variance-covariance calculations.
+"""
+function CovarianceMatrices.momentmatrix(m::FixedEffectModel)
+    isnothing(m.X) && error("Model does not have design matrix stored. Post-estimation vcov not available.")
+    isnothing(m.residuals) && error("Model does not have residuals stored. Use save=:residuals or save=:all when fitting.")
+    return m.X .* m.residuals
+end
+
+"""
+    CovarianceMatrices.score(m::FixedEffectModel)
+
+Returns the score matrix (Jacobian of moment conditions) for OLS: -X'X/n.
+"""
+function CovarianceMatrices.score(m::FixedEffectModel)
+    isnothing(m.X) && error("Model does not have design matrix stored. Post-estimation vcov not available.")
+    return -Symmetric(m.X' * m.X) / m.nobs
+end
+
+"""
+    CovarianceMatrices.objective_hessian(m::FixedEffectModel)
+
+Returns the Hessian of the least squares objective function: X'X/n.
+"""
+function CovarianceMatrices.objective_hessian(m::FixedEffectModel)
+    isnothing(m.X) && error("Model does not have design matrix stored. Post-estimation vcov not available.")
+    return Symmetric(m.X' * m.X) / m.nobs
+end
+
+##############################################################################
+##
+## Post-Estimation vcov Methods
+##
+##############################################################################
+
+"""
+    vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::FixedEffectModel)
+
+Compute variance-covariance matrix using a specified estimator from CovarianceMatrices.jl.
+
+# Supported Estimators
+- **Heteroskedasticity-robust**: `HC0`, `HC1`, `HC2`, `HC3`, `HC4`, `HC5`
+- **Cluster-robust**: Pass cluster variable directly, or use symbol if stored
+- **HAC**: `Bartlett(bw)`, `Parzen(bw)`, `QuadraticSpectral(bw)`, etc.
+
+# Examples
+```julia
+model = reg(df, @formula(y ~ x1 + x2 + fe(firm_id)))
+
+# Heteroskedasticity-robust
+vcov(HC3(), model)
+
+# Cluster-robust using symbol (looks up stored cluster variable)
+vcov(:firm_id, :CR1, model)
+vcov(:firm_id, :CR2, model)
+
+# Two-way clustering
+vcov((:firm_id, :year), :CR1, model)
+
+# Cluster-robust with manual vector
+vcov(CR1(model.cluster_vars.firm_id), model)
+
+# HAC
+vcov(Bartlett(5), model)
+```
+"""
+function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::FixedEffectModel)
+    V = CovarianceMatrices.vcov(ve, CovarianceMatrices.Information(), m)
+    return Symmetric(V)
+end
+
+##############################################################################
+##
+## Convenience Methods for Cluster-Robust with Symbol Lookup
+##
+##############################################################################
+
+"""
+    vcov(cluster_var::Symbol, estimator_type::Symbol, m::FixedEffectModel)
+
+Compute cluster-robust variance-covariance matrix using a stored cluster variable.
+
+# Arguments
+- `cluster_var::Symbol`: Name of the cluster variable (must be stored in model)
+- `estimator_type::Symbol`: Type of cluster-robust estimator (`:CR0`, `:CR1`, `:CR2`, or `:CR3`)
+- `m::FixedEffectModel`: Fitted model
+
+# Examples
+```julia
+model = reg(df, @formula(y ~ x1 + x2 + fe(firm_id)))
+
+# Single-way clustering
+vcov(:firm_id, :CR1, model)
+vcov(:firm_id, :CR2, model)
+```
+"""
+function StatsBase.vcov(cluster_var::Symbol, estimator_type::Symbol, m::FixedEffectModel)
+    # Look up cluster variable
+    haskey(m.cluster_vars, cluster_var) || _cluster_not_found_error(cluster_var, m)
+    cluster_vec = m.cluster_vars[cluster_var]
+
+    # Create appropriate estimator
+    if estimator_type == :CR0
+        ve = CovarianceMatrices.CR0(cluster_vec)
+    elseif estimator_type == :CR1
+        ve = CovarianceMatrices.CR1(cluster_vec)
+    elseif estimator_type == :CR2
+        ve = CovarianceMatrices.CR2(cluster_vec)
+    elseif estimator_type == :CR3
+        ve = CovarianceMatrices.CR3(cluster_vec)
+    else
+        error("Unknown cluster-robust estimator type: $estimator_type. Use :CR0, :CR1, :CR2, or :CR3")
+    end
+
+    return vcov(ve, m)
+end
+
+"""
+    vcov(cluster_vars::Tuple, estimator_type::Symbol, m::FixedEffectModel)
+
+Compute multi-way cluster-robust variance-covariance matrix.
+
+# Arguments
+- `cluster_vars::Tuple`: Tuple of cluster variable names
+- `estimator_type::Symbol`: Type of cluster-robust estimator (`:CR0`, `:CR1`, `:CR2`, or `:CR3`)
+- `m::FixedEffectModel`: Fitted model
+
+# Examples
+```julia
+model = reg(df, @formula(y ~ x1 + x2 + fe(firm_id) + fe(year)))
+
+# Two-way clustering
+vcov((:firm_id, :year), :CR1, model)
+
+# Three-way clustering
+vcov((:firm_id, :year, :industry), :CR1, model)
+```
+"""
+function StatsBase.vcov(cluster_vars::Tuple, estimator_type::Symbol, m::FixedEffectModel)
+    # Look up all cluster variables
+    cluster_vecs = Tuple(begin
+        haskey(m.cluster_vars, var) || _cluster_not_found_error(var, m)
+        m.cluster_vars[var]
+    end for var in cluster_vars)
+
+    # Create appropriate estimator
+    if estimator_type == :CR0
+        ve = CovarianceMatrices.CR0(cluster_vecs)
+    elseif estimator_type == :CR1
+        ve = CovarianceMatrices.CR1(cluster_vecs)
+    elseif estimator_type == :CR2
+        ve = CovarianceMatrices.CR2(cluster_vecs)
+    elseif estimator_type == :CR3
+        ve = CovarianceMatrices.CR3(cluster_vecs)
+    else
+        error("Unknown cluster-robust estimator type: $estimator_type. Use :CR0, :CR1, :CR2, or :CR3")
+    end
+
+    return vcov(ve, m)
+end
+
+"""
+    stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::FixedEffectModel)
+
+Compute standard errors using a specified variance estimator.
+
+# Examples
+```julia
+se = stderror(HC3(), model)
+se_cluster = stderror(:firm_id, :CR1, model)
+```
+"""
+function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::FixedEffectModel)
+    return sqrt.(diag(vcov(ve, m)))
+end
+
+# Convenience method for cluster-robust with symbol
+function StatsBase.stderror(cluster_var::Symbol, estimator_type::Symbol, m::FixedEffectModel)
+    return sqrt.(diag(vcov(cluster_var, estimator_type, m)))
+end
+
+# Convenience method for multi-way clustering
+function StatsBase.stderror(cluster_vars::Tuple, estimator_type::Symbol, m::FixedEffectModel)
+    return sqrt.(diag(vcov(cluster_vars, estimator_type, m)))
+end
+
+"""
+    coeftable(m::FixedEffectModel, ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator; level=0.95)
+
+Compute coefficient table with specified variance estimator.
+
+# Examples
+```julia
+coeftable(model, HC3())
+coeftable(model, :firm_id, :CR1)
+```
+"""
+function StatsBase.coeftable(m::FixedEffectModel,
+                             ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator;
+                             level::Real = 0.95)
+    se = stderror(ve, m)
+    cc = coef(m)
+    coefnms = coefnames(m)
+
+    # Compute t-statistics
+    tt = cc ./ se
+
+    # Compute confidence intervals using t-distribution
+    scale = tdistinvcdf(StatsAPI.dof_residual(m), 1 - (1 - level) / 2)
+    conf_int = hcat(cc - scale * se, cc + scale * se)
+
+    # Put (intercept) last (same logic as existing coeftable)
+    if !isempty(coefnms) && ((coefnms[1] == Symbol("(Intercept)")) || (coefnms[1] == "(Intercept)"))
+        newindex = vcat(2:length(cc), 1)
+        cc = cc[newindex]
+        se = se[newindex]
+        tt = tt[newindex]
+        conf_int = conf_int[newindex, :]
+        coefnms = coefnms[newindex]
+    end
+
+    CoefTable(
+        hcat(cc, se, tt, fdistccdf.(Ref(1), Ref(StatsAPI.dof_residual(m)), abs2.(tt)), conf_int[:, 1:2]),
+        ["Estimate", "Std. Error", "t-stat", "Pr(>|t|)", "Lower $(Int(level*100))%", "Upper $(Int(level*100))%"],
+        ["$(coefnms[i])" for i = 1:length(cc)], 4)
+end
+
+# Convenience method for cluster-robust with symbol
+function StatsBase.coeftable(m::FixedEffectModel, cluster_var::Symbol, estimator_type::Symbol; level::Real = 0.95)
+    se = stderror(cluster_var, estimator_type, m)
+    cc = coef(m)
+    coefnms = coefnames(m)
+
+    # Compute t-statistics
+    tt = cc ./ se
+
+    # Compute confidence intervals using t-distribution
+    scale = tdistinvcdf(StatsAPI.dof_residual(m), 1 - (1 - level) / 2)
+    conf_int = hcat(cc - scale * se, cc + scale * se)
+
+    # Put (intercept) last
+    if !isempty(coefnms) && ((coefnms[1] == Symbol("(Intercept)")) || (coefnms[1] == "(Intercept)"))
+        newindex = vcat(2:length(cc), 1)
+        cc = cc[newindex]
+        se = se[newindex]
+        tt = tt[newindex]
+        conf_int = conf_int[newindex, :]
+        coefnms = coefnms[newindex]
+    end
+
+    CoefTable(
+        hcat(cc, se, tt, fdistccdf.(Ref(1), Ref(StatsAPI.dof_residual(m)), abs2.(tt)), conf_int[:, 1:2]),
+        ["Estimate", "Std. Error", "t-stat", "Pr(>|t|)", "Lower $(Int(level*100))%", "Upper $(Int(level*100))%"],
+        ["$(coefnms[i])" for i = 1:length(cc)], 4)
+end
+
+# Convenience method for multi-way clustering
+function StatsBase.coeftable(m::FixedEffectModel, cluster_vars::Tuple, estimator_type::Symbol; level::Real = 0.95)
+    se = stderror(cluster_vars, estimator_type, m)
+    cc = coef(m)
+    coefnms = coefnames(m)
+
+    # Compute t-statistics
+    tt = cc ./ se
+
+    # Compute confidence intervals using t-distribution
+    scale = tdistinvcdf(StatsAPI.dof_residual(m), 1 - (1 - level) / 2)
+    conf_int = hcat(cc - scale * se, cc + scale * se)
+
+    # Put (intercept) last
+    if !isempty(coefnms) && ((coefnms[1] == Symbol("(Intercept)")) || (coefnms[1] == "(Intercept)"))
+        newindex = vcat(2:length(cc), 1)
+        cc = cc[newindex]
+        se = se[newindex]
+        tt = tt[newindex]
+        conf_int = conf_int[newindex, :]
+        coefnms = coefnms[newindex]
+    end
+
+    CoefTable(
+        hcat(cc, se, tt, fdistccdf.(Ref(1), Ref(StatsAPI.dof_residual(m)), abs2.(tt)), conf_int[:, 1:2]),
+        ["Estimate", "Std. Error", "t-stat", "Pr(>|t|)", "Lower $(Int(level*100))%", "Upper $(Int(level*100))%"],
+        ["$(coefnms[i])" for i = 1:length(cc)], 4)
+end
+
+##############################################################################
+##
+## Helper Functions for Cluster Variable Handling
+##
+##############################################################################
+
+# Extract cluster data from CR estimator (implementation depends on CovarianceMatrices.jl structure)
+function _get_cluster_data(ve::Union{CovarianceMatrices.CR0, CovarianceMatrices.CR1,
+                                      CovarianceMatrices.CR2, CovarianceMatrices.CR3})
+    # This will need to be adapted based on actual CovarianceMatrices.jl structure
+    # Placeholder: assume ve has a field `clusters`
+    return ve.clusters
+end
+
+# Rebuild CR estimator with actual cluster data
+function _rebuild_cr_estimator(ve::CovarianceMatrices.CR0, cluster_vec)
+    return CovarianceMatrices.CR0(cluster_vec)
+end
+
+function _rebuild_cr_estimator(ve::CovarianceMatrices.CR1, cluster_vec)
+    return CovarianceMatrices.CR1(cluster_vec)
+end
+
+function _rebuild_cr_estimator(ve::CovarianceMatrices.CR2, cluster_vec)
+    return CovarianceMatrices.CR2(cluster_vec)
+end
+
+function _rebuild_cr_estimator(ve::CovarianceMatrices.CR3, cluster_vec)
+    return CovarianceMatrices.CR3(cluster_vec)
+end
+
+# Error message for missing cluster variable
+function _cluster_not_found_error(cluster_name::Symbol, m::FixedEffectModel)
+    available = isempty(m.cluster_vars) ? "none" : join(keys(m.cluster_vars), ", :")
+    error("""
+    Cluster variable :$cluster_name not found in model.
+
+    Available cluster variables: :$available
+
+    To use a different cluster variable, either:
+      1. Re-run regression with save_cluster=:$cluster_name
+      2. Use manual subsetting: vcov(CR1(esample(model, df.$cluster_name)), model)
+    """)
+end
 
 function StatsAPI.loglikelihood(m::FixedEffectModel)
     n = nobs(m)

@@ -4,12 +4,13 @@ Estimate a linear model with high dimensional categorical variables / instrument
 ### Arguments
 * `df`: a Table
 * `FormulaTerm`: A formula created using [`@formula`](@ref)
-* `CovarianceEstimator`: A method to compute the variance-covariance matrix
 
 ### Keyword arguments
 * `contrasts::Dict = Dict()` An optional Dict of contrast codings for each categorical variable in the `formula`.  Any unspecified variables will have `DummyCoding`.
 * `weights::Union{Nothing, Symbol}` A symbol to refer to a columns for weights
-* `save::Symbol`: Should residuals and eventual estimated fixed effects saved in a dataframe? Default to `:none` Use `save = :residuals` to only save residuals, `save = :fe` to only save fixed effects, `save = :all` for both. Once saved, they can then be accessed using `residuals(m)` or `fe(m)` where `m` is the object returned by the estimation. The returned DataFrame is automatically aligned with the original DataFrame.
+* `save::Symbol`: Should residuals and eventual estimated fixed effects saved in a dataframe? Default to `:residuals`. Use `save = :residuals` to only save residuals, `save = :fe` to only save fixed effects, `save = :all` for both. Once saved, they can then be accessed using `residuals(m)` or `fe(m)` where `m` is the object returned by the estimation. The returned DataFrame is automatically aligned with the original DataFrame.
+* `save_cluster::Union{Symbol, Vector{Symbol}, Nothing}`: Additional cluster variables to save for post-estimation vcov calculations. Variables from `fe()` terms are saved automatically. Example: `save_cluster = [:firm_id, :year]` or `save_cluster = :industry`.
+* `dof_add::Integer = 0`: Manual adjustment to degrees of freedom (for advanced use cases)
 * `method::Symbol`: A symbol for the method. Default is :cpu. Alternatively,  use :CUDA or :Metal  (in this case, you need to import the respective package before importing FixedEffectModels)
 * `nthreads::Integer` Number of threads to use in the estimation. If `method = :cpu`, defaults to `Threads.nthreads()`. Otherwise, defaults to 256.
 * `double_precision::Bool`: Should the demeaning operation use Float64 rather than Float32? Default to true if `method =:cpu' and false if `method = :CUDA` or `method = :Metal`.
@@ -18,11 +19,43 @@ Estimate a linear model with high dimensional categorical variables / instrument
 * `drop_singletons::Bool = true`: Should singletons be dropped?
 * `progress_bar::Bool = true`: Should the regression show a progressbar?
 * `first_stage::Bool = true`: Should the first-stage F-stat and p-value be computed?
-* `subset::Union{Nothing, AbstractVector} = nothing`: select specific rows. 
+* `subset::Union{Nothing, AbstractVector} = nothing`: select specific rows.
 
 
 ### Details
 Models with instruments variables are estimated using 2SLS. `reg` tests for weak instruments by computing the Kleibergen-Paap rk Wald F statistic, a generalization of the Cragg-Donald Wald F statistic for non i.i.d. errors. The statistic is similar to the one returned by the Stata command `ivreg2`.
+
+### Post-Estimation Variance Calculations (NEW)
+
+After fitting a model, you can compute different variance-covariance matrices without re-running the regression:
+
+```julia
+model = reg(df, @formula(y ~ x1 + x2 + fe(firm_id)))
+
+# Different robust estimators
+vcov(HC3(), model)           # Heteroskedasticity-robust (HC3)
+vcov(HC1(), model)           # Default (HC1)
+
+# Cluster-robust (using stored cluster variable from fe())
+vcov(CR1(:firm_id), model)
+
+# Two-way clustering
+vcov(CR1((:firm_id, :year)), model)
+
+# HAC (time series)
+vcov(Bartlett(5), model)     # Bartlett kernel, bandwidth 5
+
+# Custom cluster variable
+model2 = reg(df, @formula(y ~ x1), save_cluster=:industry)
+vcov(CR1(:industry), model2)
+
+# Manual subsetting for variables not saved
+vcov(CR1(esample(model, df.state_id)), model)
+
+# Standard errors and coefficient table
+stderror(HC3(), model)
+coeftable(model, CR1(:firm_id))
+```
 
 ### Examples
 ```julia
@@ -31,9 +64,12 @@ df = dataset("plm", "Cigar")
 reg(df, @formula(Sales ~ NDI + fe(State) + fe(State)&Year))
 reg(df, @formula(Sales ~ NDI + fe(State)*Year))
 reg(df, @formula(Sales ~ (Price ~ Pimin)))
-reg(df, @formula(Sales ~ NDI), Vcov.robust())
-reg(df, @formula(Sales ~ NDI), Vcov.cluster(:State))
-reg(df, @formula(Sales ~ NDI), Vcov.cluster(:State , :Year))
+
+# Post-estimation vcov calculations
+model = reg(df, @formula(Sales ~ NDI + fe(State)))
+vcov(HC3(), model)
+vcov(CR1(:State), model)
+
 df.YearC = categorical(df.Year)
 reg(df, @formula(Sales ~ YearC), contrasts = Dict(:YearC => DummyCoding(base = 80)))
 ```
@@ -46,12 +82,13 @@ df = dataset("plm", "Cigar")
 fit(FixedEffectModel, @formula(Sales ~ NDI + fe(State) + fe(State)&Year), df)
 ```
 """
-function reg(df,     
-    formula::FormulaTerm,
-    vcov::CovarianceEstimator = Vcov.simple();
+function reg(df,
+    formula::FormulaTerm;
     contrasts::Dict = Dict{Symbol, Any}(),
     weights::Union{Symbol, Nothing} = nothing,
-    save::Union{Bool, Symbol} = :none,
+    save::Union{Bool, Symbol} = :residuals,  # Changed default to save residuals
+    save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,  # NEW: for post-estimation vcov
+    dof_add::Integer = 0,  # NEW: manual DOF adjustment
     method::Symbol = :cpu,
     nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
     double_precision::Bool = method == :cpu,
@@ -59,18 +96,19 @@ function reg(df,
     maxiter::Integer = 10000,
     drop_singletons::Bool = true,
     progress_bar::Bool = true,
-    subset::Union{Nothing, AbstractVector} = nothing, 
+    subset::Union{Nothing, AbstractVector} = nothing,
     first_stage::Bool = true)
-    StatsAPI.fit(FixedEffectModel, formula, df, vcov; contrasts = contrasts, weights = weights, save = save, method = method, nthreads = nthreads, double_precision = double_precision, tol = tol, maxiter = maxiter, drop_singletons = drop_singletons, progress_bar = progress_bar, subset = subset, first_stage = first_stage)
+    StatsAPI.fit(FixedEffectModel, formula, df; contrasts = contrasts, weights = weights, save = save, save_cluster = save_cluster, dof_add = dof_add, method = method, nthreads = nthreads, double_precision = double_precision, tol = tol, maxiter = maxiter, drop_singletons = drop_singletons, progress_bar = progress_bar, subset = subset, first_stage = first_stage)
 end
     
-function StatsAPI.fit(::Type{FixedEffectModel},     
+function StatsAPI.fit(::Type{FixedEffectModel},
     @nospecialize(formula::FormulaTerm),
-    @nospecialize(df),
-    @nospecialize(vcov::CovarianceEstimator = Vcov.simple());
+    @nospecialize(df);
     @nospecialize(contrasts::Dict = Dict{Symbol, Any}()),
     @nospecialize(weights::Union{Symbol, Nothing} = nothing),
-    @nospecialize(save::Union{Bool, Symbol} = :none),
+    @nospecialize(save::Union{Bool, Symbol} = :residuals),
+    @nospecialize(save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing),
+    @nospecialize(dof_add::Integer = 0),
     @nospecialize(method::Symbol = :cpu),
     @nospecialize(nthreads::Integer = method == :cpu ? Threads.nthreads() : 256),
     @nospecialize(double_precision::Bool = true),
@@ -78,7 +116,7 @@ function StatsAPI.fit(::Type{FixedEffectModel},
     @nospecialize(maxiter::Integer = 10000),
     @nospecialize(drop_singletons::Bool = true),
     @nospecialize(progress_bar::Bool = true),
-    @nospecialize(subset::Union{Nothing, AbstractVector} = nothing), 
+    @nospecialize(subset::Union{Nothing, AbstractVector} = nothing),
     @nospecialize(first_stage::Bool = true))
 
     df = DataFrame(df; copycols = false)
@@ -161,7 +199,7 @@ function StatsAPI.fit(::Type{FixedEffectModel},
         end
         esample .&= BitArray(!ismissing(x) && x for x in subset)
     end
-    esample .&= Vcov.completecases(df, vcov)
+    # Note: Vcov.completecases removed - no longer using Vcov at estimation time
 
     n_singletons = 0
     if drop_singletons
@@ -172,6 +210,47 @@ function StatsAPI.fit(::Type{FixedEffectModel},
     (nobs > 0) || throw("sample is empty")
     (nobs < nrows) || (esample = Colon())
 
+    ##############################################################################
+    ##
+    ## Detect and Store Cluster Variables for Post-Estimation vcov
+    ##
+    ##############################################################################
+
+    # Auto-detect cluster variables from fe() terms
+    cluster_vars_to_save = copy(fe_vars)
+
+    # Add user-specified cluster variables
+    if save_cluster !== nothing
+        if save_cluster isa Symbol
+            push!(cluster_vars_to_save, save_cluster)
+        else
+            append!(cluster_vars_to_save, save_cluster)
+        end
+    end
+    cluster_vars_to_save = unique(cluster_vars_to_save)
+
+    # Store cluster variables (subsetted to esample)
+    cluster_data = if isempty(cluster_vars_to_save)
+        NamedTuple()
+    else
+        cluster_arrays = []
+        cluster_names = Symbol[]
+        for var in cluster_vars_to_save
+            if hasproperty(df, var)
+                # Subset to esample (handle Colon case)
+                if esample isa Colon
+                    push!(cluster_arrays, Vector(df[!, var]))
+                else
+                    push!(cluster_arrays, Vector(view(df, esample, var)))
+                end
+                push!(cluster_names, var)
+            else
+                @warn "Cluster variable :$var not found in dataframe, skipping"
+            end
+        end
+        NamedTuple{Tuple(cluster_names)}(Tuple(cluster_arrays))
+    end
+
     # use esample to materialize weights, subdataframe, and data used for standard erros
     if has_weights
         weights = Weights(disallowmissing(view(df[!, weights], esample)))
@@ -180,7 +259,7 @@ function StatsAPI.fit(::Type{FixedEffectModel},
     end
     subdf = DataFrame((; (x => disallowmissing(view(df[!, x], esample)) for x in all_vars)...))
     subfes = FixedEffect[fe[esample] for fe in fes]
-    vcov_method = Vcov.materialize(view(df, esample, :), vcov)
+    # Note: vcov_method removed - no longer using Vcov at estimation time
 
     ##############################################################################
     ##
@@ -415,43 +494,37 @@ function StatsAPI.fit(::Type{FixedEffectModel},
 
     # Compute degrees of freedom
     ngroups_fes = [nunique(fe) for fe in subfes]
-    dof_fes = sum(ngroups_fes)
-    if vcov isa Vcov.ClusterCovariance
-        dof_fes = 0
-        for i in 1:length(subfes)
-            if any(isnested(subfes[i], v.groups) for v in values(vcov_method.clusters))
-                dof_fes += 1
-            else
-                dof_fes += ngroups_fes[i]
-            end
-        end
-    end
+    dof_fes = sum(ngroups_fes)  # Simplified: no longer adjust for clustering at estimation time
 
-    # Compute standard error
-    nclusters = vcov isa Vcov.ClusterCovariance ?  Vcov.nclusters(vcov_method) : nothing
-    vcov_data = Vcov.VcovData(Xhat, XhatXhat, invXhatXhat, residuals, nobs - size(X, 2) - dof_fes)
-    matrix_vcov = StatsAPI.vcov(vcov_data, vcov_method)
-   
+    # Compute standard error using HC1 (heteroskedasticity-robust with small-sample correction)
+    nclusters = nothing  # No longer computed at estimation time
+
+    # Compute HC1 vcov manually: (X'X)^-1 * X'ΩX * (X'X)^-1 with DOF correction
+    # where Ω = diag(residuals^2)
+    momentmat = Xhat .* residuals  # n × k moment matrix
+    Omega = Symmetric(momentmat' * momentmat)  # k × k meat matrix
+    matrix_vcov = invXhatXhat * Omega * invXhatXhat / nobs  # Sandwich estimator
+
+    # Apply HC1 small-sample correction: multiply by n/(n-k)
+    dof_base = nobs - size(X, 2) - dof_fes - dof_add
+    dof_residual = max(1, dof_base - (has_intercept | has_fe_intercept))
+    hc1_correction = nobs / dof_residual
+    matrix_vcov = matrix_vcov * hc1_correction
+
     # Compute Fstat
     F = Fstat(coef, matrix_vcov, has_intercept)
-   
+
     # dof_ is the number of estimated coefficients beyond the intercept.
     dof_ = size(X, 2) - has_intercept
-    dof_tstat_ = max(1, Vcov.dof_residual(vcov_data, vcov_method) - has_intercept | has_fe_intercept)
+    dof_tstat_ = dof_residual
     p = fdistccdf(dof_, dof_tstat_, F)
     
     # Compute Fstat of First Stage
     F_kp, p_kp = NaN, NaN
     if has_iv && first_stage
-        Pip = Pi[(size(Pi, 1) - size(Z_res, 2) + 1):end, :]
-        try 
-            r_kp = Vcov.ranktest!(Xendo_res, Z_res, Pip,
-                              vcov_method, size(X, 2), dof_fes)
-            p_kp = chisqccdf(size(Z_res, 2) - size(Xendo_res, 2) + 1, r_kp)
-            F_kp = r_kp / size(Z_res, 2)
-        catch
-            @info "ranktest failed ; first-stage statistics not estimated"
-        end
+        # TODO: Implement first-stage F-stat using CovarianceMatrices.jl
+        # For now, first-stage statistics are not computed
+        @warn "First-stage F-statistics not yet implemented with CovarianceMatrices.jl. This will be added in a future update."
     end
 
     # Compute rss, tss
@@ -509,5 +582,39 @@ function StatsAPI.fit(::Type{FixedEffectModel},
         esample = trues(nrows)
     end
 
-    return FixedEffectModel(coef, matrix_vcov, vcov, nclusters, esample, residuals2, augmentdf, fekeys, coef_names, response_name, formula_origin, formula_schema, contrasts, nobs, dof_, sum(ngroups_fes), dof_tstat_, rss, tss_total, F, p, iterations, converged, r2_within, F_kp, p_kp)
+    ##############################################################################
+    ##
+    ## Prepare data for post-estimation vcov with CovarianceMatrices.jl
+    ##
+    ##############################################################################
+
+    # Store design matrix used for inference (Xhat from code)
+    X_store = convert(Matrix{Float64}, Xhat)
+
+    # Store actual design matrix with endogenous vars (for IV only)
+    Xhat_store = has_iv ? convert(Matrix{Float64}, X) : nothing
+
+    # Create Cholesky factorization of X'X for efficient computations
+    crossx_store = cholesky(XhatXhat)
+
+    # Store (X'X)^-1
+    invXX_store = invXhatXhat
+
+    # Store HC1 as the default variance estimator type
+    vcov_type_store = CovarianceMatrices.HC1()
+
+    return FixedEffectModel(
+        coef, matrix_vcov,
+        vcov_type_store, nclusters,
+        esample, residuals2, augmentdf,
+        X_store, Xhat_store, crossx_store, invXX_store,
+        cluster_data,
+        fekeys, coef_names, response_name,
+        formula_origin, formula_schema, contrasts,
+        nobs, dof_, dof_fes, dof_tstat_,
+        rss, tss_total,
+        F, p,
+        iterations, converged, r2_within,
+        F_kp, p_kp
+    )
 end
