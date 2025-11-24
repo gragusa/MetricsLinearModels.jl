@@ -1,6 +1,7 @@
-The FixedEffectModels.jl package is licensed under the MIT "Expat" License:
+The MetricsLinearModels.jl package is licensed under the MIT "Expat" License:
 
-> Copyright (c) 2015: Matthieu Gomez.
+> Copyright (c) 2025: Giuseppe Ragusa (fork)
+> Copyright (c) 2015: Matthieu Gomez (original FixedEffectModels.jl).
 >
 > Permission is hereby granted, free of charge, to any person obtaining
 > a copy of this software and associated documentation files (the

@@ -1,5 +1,5 @@
 
-module FixedEffectModels
+module MetricsLinearModels
 
 
 using DataFrames

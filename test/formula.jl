@@ -1,6 +1,6 @@
 using CSV, DataFrames, Test
-using FixedEffectModels
-using FixedEffectModels: parse_fixedeffect, _parse_fixedeffect, _multiply
+using MetricsLinearModels
+using MetricsLinearModels: parse_fixedeffect, _parse_fixedeffect, _multiply
 using FixedEffects
 import Base: ==
 

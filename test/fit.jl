@@ -1,5 +1,5 @@
-using FixedEffectModels, CategoricalArrays, CSV, DataFrames, Test, LinearAlgebra
-using FixedEffectModels: nullloglikelihood_within
+using MetricsLinearModels, CategoricalArrays, CSV, DataFrames, Test, LinearAlgebra
+using MetricsLinearModels: nullloglikelihood_within
 using CUDA, Metal
 
 ##############################################################################

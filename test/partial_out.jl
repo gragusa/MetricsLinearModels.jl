@@ -1,7 +1,7 @@
-using FixedEffectModels, DataFrames, Statistics, CSV, Test
+using MetricsLinearModels, DataFrames, Statistics, CSV, Test
 
 @testset "partial out" begin
-	df = DataFrame(CSV.File(joinpath(dirname(pathof(FixedEffectModels)), "../dataset/Cigar.csv")))
+	df = DataFrame(CSV.File(joinpath(dirname(pathof(MetricsLinearModels)), "../dataset/Cigar.csv")))
 
 
 

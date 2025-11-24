@@ -1,6 +1,6 @@
-name = "FixedEffectModels"
+name = "MetricsLinearModels"
 uuid = "9d5cd8c9-2029-5cab-9928-427838db53e3"
-version = "1.12.0"
+version = "0.1.0"
 
 [deps]
 CovarianceMatrices = "60f91f6f-d783-54cb-84f9-544141854719"

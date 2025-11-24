@@ -23,7 +23,7 @@ Finally, with the option `add_mean = true`, the mean of the initial variable is 
 
 ### Examples
 ```julia
-using  RDatasets, DataFrames, FixedEffectModels, Gadfly
+using  RDatasets, DataFrames, MetricsLinearModels, Gadfly
 df = dataset("datasets", "iris")
 result = partial_out(df, @formula(SepalWidth + SepalLength ~ fe(Species)), add_mean = true)
 plot(layer(result[1], x="SepalWidth", y="SepalLength", Stat.binmean(n=10), Geom.point),

@@ -1,4 +1,4 @@
-using FixedEffectModels, Test
+using MetricsLinearModels, Test
 
 @testset "formula" begin include("formula.jl") end
 @testset "fit" begin include("fit.jl") end

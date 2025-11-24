@@ -1,9 +1,9 @@
-using DataFrames, CSV, FixedEffectModels, Random, Statistics, Test
+using DataFrames, CSV, MetricsLinearModels, Random, Statistics, Test
 
 @testset "collinearity_with_fixedeffects" begin
 
   # read the data
-  csvfile = CSV.File(joinpath(dirname(pathof(FixedEffectModels)), "../dataset/Cigar.csv"))
+  csvfile = CSV.File(joinpath(dirname(pathof(MetricsLinearModels)), "../dataset/Cigar.csv"))
   df = DataFrame(csvfile)
 
   # create a bigger dataset

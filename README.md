@@ -1,12 +1,18 @@
-[![Build status](https://github.com/FixedEffects/FixedEffectModels.jl/workflows/CI/badge.svg)](https://github.com/FixedEffects/FixedEffectModels.jl/actions)
+# MetricsLinearModels.jl
 
 This package estimates linear models with high dimensional categorical variables, potentially including instrumental variables.
 
+This is a fork of [FixedEffectModels.jl](https://github.com/FixedEffects/FixedEffectModels.jl) with additional features and improvements.
+
 ## Installation
-The package is registered in the [`General`](https://github.com/JuliaRegistries/General) registry and so can be installed at the REPL with `] add FixedEffectModels`.
+The package can be installed via:
+```julia
+using Pkg
+Pkg.add(url="https://github.com/gragusa/MetricsLinearModels.jl")
+```
 
 ## Benchmarks
-The objective of the package is similar to the Stata command [`reghdfe`](https://github.com/sergiocorreia/reghdfe) and the R packages [`lfe`](https://cran.r-project.org/web/packages/lfe/lfe.pdf) and [`fixest`](https://lrberge.github.io/fixest/). The package is much faster than `reghdfe` or `lfe`. It also tends to be a bit faster than the more recent `fixest` (depending on the exact command). For complicated models, `FixedEffectModels` can also run on Nvidia GPUs for even faster performances (see below)
+The objective of the package is similar to the Stata command [`reghdfe`](https://github.com/sergiocorreia/reghdfe) and the R packages [`lfe`](https://cran.r-project.org/web/packages/lfe/lfe.pdf) and [`fixest`](https://lrberge.github.io/fixest/). The package is much faster than `reghdfe` or `lfe`. It also tends to be a bit faster than the more recent `fixest` (depending on the exact command). For complicated models, `MetricsLinearModels` can also run on Nvidia GPUs for even faster performances (see below)
 
 
 ![benchmark](http://www.matthieugomez.com/files/fixedeffectmodels_benchmark.png)
@@ -14,7 +20,7 @@ The objective of the package is similar to the Stata command [`reghdfe`](https:/
 ## Syntax
 
 ```julia
-using DataFrames, RDatasets, FixedEffectModels
+using DataFrames, RDatasets, MetricsLinearModels
 df = dataset("plm", "Cigar")
 reg(df, @formula(Sales ~ NDI + fe(State) + fe(Year)), Vcov.cluster(:State), weights = :Pop)
 #                             FixedEffectModel                            

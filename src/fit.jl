@@ -11,7 +11,7 @@ Estimate a linear model with high dimensional categorical variables / instrument
 * `save::Symbol`: Should residuals and eventual estimated fixed effects saved in a dataframe? Default to `:residuals`. Use `save = :residuals` to only save residuals, `save = :fe` to only save fixed effects, `save = :all` for both. Once saved, they can then be accessed using `residuals(m)` or `fe(m)` where `m` is the object returned by the estimation. The returned DataFrame is automatically aligned with the original DataFrame.
 * `save_cluster::Union{Symbol, Vector{Symbol}, Nothing}`: Additional cluster variables to save for post-estimation vcov calculations. Variables from `fe()` terms are saved automatically. Example: `save_cluster = [:firm_id, :year]` or `save_cluster = :industry`.
 * `dof_add::Integer = 0`: Manual adjustment to degrees of freedom (for advanced use cases)
-* `method::Symbol`: A symbol for the method. Default is :cpu. Alternatively,  use :CUDA or :Metal  (in this case, you need to import the respective package before importing FixedEffectModels)
+* `method::Symbol`: A symbol for the method. Default is :cpu. Alternatively,  use :CUDA or :Metal  (in this case, you need to import the respective package before importing MetricsLinearModels)
 * `nthreads::Integer` Number of threads to use in the estimation. If `method = :cpu`, defaults to `Threads.nthreads()`. Otherwise, defaults to 256.
 * `double_precision::Bool`: Should the demeaning operation use Float64 rather than Float32? Default to true if `method =:cpu' and false if `method = :CUDA` or `method = :Metal`.
 * `tol::Real` Tolerance. Default to 1e-6.
@@ -59,7 +59,7 @@ coeftable(model, CR1(:firm_id))
 
 ### Examples
 ```julia
-using RDatasets, FixedEffectModels
+using RDatasets, MetricsLinearModels
 df = dataset("plm", "Cigar")
 reg(df, @formula(Sales ~ NDI + fe(State) + fe(State)&Year))
 reg(df, @formula(Sales ~ NDI + fe(State)*Year))
@@ -77,7 +77,7 @@ reg(df, @formula(Sales ~ YearC), contrasts = Dict(:YearC => DummyCoding(base = 8
 ### Alias
 `reg` is an alias for the more typical StatsAPI `fit`
 ```julia
-using RDatasets, FixedEffectModels
+using RDatasets, MetricsLinearModels
 df = dataset("plm", "Cigar")
 fit(FixedEffectModel, @formula(Sales ~ NDI + fe(State) + fe(State)&Year), df)
 ```

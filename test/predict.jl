@@ -1,10 +1,10 @@
-using FixedEffectModels, DataFrames, CategoricalArrays, CSV, Test
+using MetricsLinearModels, DataFrames, CategoricalArrays, CSV, Test
 
 
 
 @testset "print results" begin
 
-	df = DataFrame(CSV.File(joinpath(dirname(pathof(FixedEffectModels)), "../dataset/Cigar.csv")))
+	df = DataFrame(CSV.File(joinpath(dirname(pathof(MetricsLinearModels)), "../dataset/Cigar.csv")))
 	df.StateC = categorical(df.State)
 
 	model = @formula Sales ~ NDI
