@@ -1,4 +1,5 @@
 using DataFrames, CSV, MetricsLinearModels, Random, Statistics, Test
+using StatsBase: coef, stderror
 
 @testset "collinearity_with_fixedeffects" begin
 
@@ -24,11 +25,13 @@ using DataFrames, CSV, MetricsLinearModels, Random, Statistics, Test
   dflarge.catvar = rand(1:200, nrow(dflarge))
 
   # run the regression with the default setting (tol = 1e-6)
-  rr = reg(dflarge, @formula(Price ~ highstate + Pop + fe(Year) + fe(catvar) + fe(State)), Vcov.cluster(:State); tol=1e-6)
+  # Fixed: use ols for non-IV formula, cluster SE via post-estimation
+  rr = ols(dflarge, @formula(Price ~ highstate + Pop + fe(Year) + fe(catvar) + fe(State)),
+           save_cluster=:State, tol=1e-6)
 
   # test that the collinear coefficient is zero and the standard error is NaN
-  @test rr.coef[1] ≈ 0.0
-  @test isnan(stderror(rr)[1])
+  @test coef(rr)[1] ≈ 0.0  # Fixed: use coef(rr) function, not rr.coef
+  @test isnan(stderror(:State, :CR1, rr)[1])
 
 
 
@@ -41,6 +44,6 @@ using DataFrames, CSV, MetricsLinearModels, Random, Statistics, Test
        35.3885  44.5109;], 
        :auto
   )
-  rr = reg(df, @formula(x1 ~ x2))
+  rr = ols(df, @formula(x1 ~ x2))  # Fixed: use ols for non-IV formula
   @test all(!isnan, stderror(rr))
 end

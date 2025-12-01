@@ -1,0 +1,248 @@
+##############################################################################
+##
+## OLS Estimation - New Architecture with GLM-compatible Structure
+##
+##############################################################################
+
+"""
+    fit_ols(df, formula; kwargs...) -> OLSEstimator{T}
+
+Fit a linear model using Ordinary Least Squares (OLS).
+
+This is the lean, fast workhorse function for linear regression.
+Supports fixed effects but NOT instrumental variables.
+
+# New Features
+- `factorization::Symbol`: Choose `:auto` (default), `:chol`, or `:qr`
+  - `:auto`: Cholesky for k < 100, QR for k >= 100
+  - `:chol`: Faster but less stable (uses Cholesky decomposition)
+  - `:qr`: More stable but ~2x slower (uses QR decomposition)
+"""
+function fit_ols(df,
+                 formula::FormulaTerm;
+                 contrasts::Dict = Dict{Symbol, Any}(),
+                 weights::Union{Symbol, Nothing} = nothing,
+                 save::Union{Bool, Symbol} = :residuals,
+                 save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+                 dof_add::Integer = 0,
+                 method::Symbol = :cpu,
+                 factorization::Symbol = :auto,  # NEW: :auto, :chol, or :qr
+                 nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
+                 double_precision::Bool = method == :cpu,
+                 tol::Real = 1e-6,
+                 maxiter::Integer = 10000,
+                 drop_singletons::Bool = true,
+                 progress_bar::Bool = true,
+                 subset::Union{Nothing, AbstractVector} = nothing)
+
+    # Validate keywords
+    save, save_residuals = validate_save_keyword(save)
+    nthreads = validate_nthreads(method, nthreads)
+
+    # Validate factorization choice
+    factorization in (:auto, :chol, :qr) ||
+        throw(ArgumentError("factorization must be :auto, :chol, or :qr, got :$factorization"))
+
+    # Convert to DataFrame
+    df = DataFrame(df; copycols = false)
+
+    ##############################################################################
+    ## Prepare Data
+    ##############################################################################
+
+    data_prep = prepare_data(df, formula, weights, subset, save, drop_singletons, nthreads)
+
+    # Extract cluster variables
+    cluster_data = extract_cluster_variables(df, data_prep.fe_vars, save_cluster, data_prep.esample)
+
+    # Create subsetted dataframe and weights
+    if data_prep.has_weights
+        wts = Weights(disallowmissing(view(df[!, weights], data_prep.esample)))
+    else
+        wts = uweights(data_prep.nobs)
+    end
+
+    subdf = DataFrame((; (x => disallowmissing(view(df[!, x], data_prep.esample))
+                          for x in data_prep.all_vars)...))
+    subfes = FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
+
+    ##############################################################################
+    ## Create Model Matrices
+    ##############################################################################
+
+    # Determine numeric type
+    T = double_precision ? Float64 : Float32
+
+    # Apply schema
+    s = schema(data_prep.formula, subdf, contrasts)
+    formula_schema = apply_schema(data_prep.formula, s, OLSEstimator, data_prep.has_fe_intercept)
+
+    # Create matrices
+    y = convert(Vector{T}, response(formula_schema, subdf))
+    X = convert(Matrix{T}, modelmatrix(formula_schema, subdf))
+    response_name, coef_names = coefnames(formula_schema)
+
+    # Build response object (fitted values will be set after solve)
+    rr = build_response(y, wts, Symbol(response_name))
+
+    # Compute total sum of squares before demeaning
+    tss_total = compute_tss_total(rr.y, wts, data_prep.has_intercept | data_prep.has_fe_intercept)
+
+    # Validate finite values
+    all(isfinite, wts) || throw("Weights are not finite")
+    all(isfinite, rr.y) || throw("Some observations for the dependent variable are infinite")
+    all(isfinite, X) || throw("Some observations for the exogenous variables are infinite")
+
+    ##############################################################################
+    ## Partial Out Fixed Effects
+    ##############################################################################
+
+    oldy, oldX = nothing, nothing
+    feM = nothing
+
+    if data_prep.has_fes
+        # Combine columns for demeaning
+        cols = vcat(eachcol(rr.y), eachcol(X))
+        colnames = vcat(response_name, coef_names)
+
+        # Partial out fixed effects (modifies cols in-place)
+        feM, iterations, converged, tss_partial, oldy, oldX =
+            partial_out_fixed_effects!(cols, colnames, subfes, wts, method, nthreads,
+                                       tol, maxiter, progress_bar, data_prep.save_fes,
+                                       data_prep.has_intercept, data_prep.has_fe_intercept, T)
+    else
+        iterations, converged = 0, true
+        tss_partial = tss_total
+    end
+
+    ##############################################################################
+    ## Apply Weights
+    ##############################################################################
+
+    if data_prep.has_weights
+        sqrtw = sqrt.(wts)
+        rr.y .= rr.y .* sqrtw
+        X .= X .* sqrtw
+    end
+
+    ##############################################################################
+    ## Choose Factorization Method
+    ##############################################################################
+
+    if factorization == :auto
+        k = size(X, 2)
+        # Heuristic: Cholesky is 2x faster but less stable
+        # For k < 100, use Cholesky; for k >= 100, use QR for stability
+        factorization = k < 100 ? :chol : :qr
+    end
+
+    ##############################################################################
+    ## Build Predictor and Solve
+    ##############################################################################
+
+    # Build predictor with factorization and solve for coefficients
+    # This also detects collinearity and returns basis_coef
+    pp, basis_coef = build_predictor(X, rr.y, factorization, data_prep.has_intercept)
+
+    # Solve for coefficients (updates pp.beta and rr.mu)
+    solve_ols!(rr, pp, basis_coef)
+
+    ##############################################################################
+    ## Compute Residuals and Statistics
+    ##############################################################################
+
+    # Compute residuals
+    residuals = rr.y .- rr.mu
+
+    # Residual sum of squares
+    rss = sum(abs2, residuals)
+
+    # Degrees of freedom
+    ngroups_fes = [nunique(fe) for fe in subfes]
+    dof_fes = sum(ngroups_fes)
+    dof_model = sum(basis_coef)  # Only non-collinear coefficients
+    dof_base = data_prep.nobs - dof_model - dof_fes - dof_add
+    dof_residual = max(1, dof_base - (data_prep.has_intercept | data_prep.has_fe_intercept))
+
+    # R-squared
+    r2 = 1 - rss / tss_total
+    r2_within = data_prep.has_fes ? 1 - rss / tss_partial : r2
+
+    # F-statistic and p-value
+    # Numerator DOF for F-test excludes intercept (tests joint significance of slopes)
+    # For models with FE, use within TSS; otherwise use total TSS
+    tss_for_fstat = data_prep.has_fes ? tss_partial : tss_total
+    mss_val = tss_for_fstat - rss
+    dof_model_ftest = dof_model - (data_prep.has_intercept & !data_prep.has_fe_intercept)
+    F_stat = dof_model_ftest > 0 ? (mss_val / dof_model_ftest) / (rss / dof_residual) : T(NaN)
+    p_val = dof_model_ftest > 0 ? fdistccdf(dof_model_ftest, dof_residual, F_stat) : T(NaN)
+
+    ##############################################################################
+    ## Solve for Fixed Effects (if requested)
+    ##############################################################################
+
+    augmentdf = DataFrame()
+    if data_prep.save_fes && oldy !== nothing
+        # Solve for FE estimates
+        # Note: oldX was saved before collinearity detection, so filter by basis_coef
+        newfes, b, c = solve_coefficients!(oldy - oldX[:, basis_coef] * pp.beta[basis_coef], feM;
+                                          tol = tol, maxiter = maxiter)
+
+        # Create DataFrame with FE estimates
+        for fekey in data_prep.fekeys
+            augmentdf[!, fekey] = df[!, fekey]
+        end
+        for j in eachindex(subfes)
+            augmentdf[!, data_prep.feids[j]] = Vector{Union{T, Missing}}(missing, data_prep.nrows)
+            augmentdf[data_prep.esample, data_prep.feids[j]] = newfes[j]
+        end
+    end
+
+    ##############################################################################
+    ## Build Fixed Effects Component
+    ##############################################################################
+
+    # Use cluster_data which was already extracted and subsetted
+    cluster_vars_nt = cluster_data
+
+    fes = OLSFixedEffects{T}(
+        augmentdf,
+        data_prep.fekeys,
+        cluster_vars_nt,
+        dof_fes,
+        ngroups_fes,
+        iterations,
+        converged,
+        method
+    )
+
+    ##############################################################################
+    ## Handle esample
+    ##############################################################################
+
+    # Handle Colon case for esample
+    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) : data_prep.esample
+
+    ##############################################################################
+    ## Convert coefficient names to strings
+    ##############################################################################
+
+    coef_names_str = String[string(name) for name in coef_names]
+
+    ##############################################################################
+    ## Return OLSEstimator
+    ##############################################################################
+
+    # Ensure all statistics are of type T for type stability
+    return OLSEstimator(
+        rr, pp, fes,
+        data_prep.formula_origin, formula_schema, contrasts,
+        esample_final,
+        coef_names_str, basis_coef,
+        data_prep.nobs, dof_model, dof_fes, dof_residual,
+        T(tss_total), T(tss_partial), T(rss),
+        T(r2), T(r2_within),
+        data_prep.has_intercept,
+        T(F_stat), T(p_val)
+    )
+end

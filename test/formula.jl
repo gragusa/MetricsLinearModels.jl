@@ -8,7 +8,7 @@ function ==(x::FixedEffect, y::FixedEffect)
     x.refs == y.refs && x.interaction == y.interaction && x.n == y.n
 end
 
-csvfile = CSV.File(joinpath(dirname(pathof(FixedEffectModels)), "../dataset/Cigar.csv"))
+csvfile = CSV.File(joinpath(dirname(pathof(MetricsLinearModels)), "../dataset/Cigar.csv"))
 df = DataFrame(csvfile)
 
 # Any table type supporting the Tables.jl interface should work

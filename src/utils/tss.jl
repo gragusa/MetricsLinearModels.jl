@@ -7,6 +7,16 @@ function tss(y::AbstractVector, hasintercept::Bool, weights::AbstractWeights)
     end
 end
 
+# Convenience wrapper that assumes intercept
+function tss(y::AbstractVector, weights::AbstractWeights)
+    tss(y, true, weights)
+end
+
+# Convenience wrapper for compute_tss
+function compute_tss(y::AbstractVector, weights::AbstractWeights, hasintercept::Bool)
+    tss(y, hasintercept, weights)
+end
+
 function Fstat(coef::Vector{Float64}, matrix_vcov::AbstractMatrix{Float64}, has_intercept::Bool)
     coefF = copy(coef)
     # TODO: check I can't do better
