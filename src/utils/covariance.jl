@@ -52,6 +52,41 @@ function CM.aVar(
     return Σ_out
 end
 
+# Disambiguating method for cluster-robust estimators (CR <: AbstractAsymptoticVarianceEstimator)
+# This resolves ambiguity between:
+#   - aVar(k::K, m::OLSEstimator) where K <: AbstractAsymptoticVarianceEstimator (above)
+#   - aVar(k::CR, m::RegressionModel) from CovarianceMatrices.jl
+function CM.aVar(
+        k::K,
+        m::OLSEstimator;
+        demean = false,
+        prewhite = false,
+        scale = true,
+        kwargs...
+) where {K <: CM.CR}
+    mm = begin
+        u = residualadjustment(k, m)
+        M = copy(momentmatrix(m))
+        @. M = M * u
+        M
+    end
+    basis_coef = m.basis_coef
+    Σ = aVar(k, mm; demean = demean, prewhite = prewhite, scale = scale)
+
+    all(basis_coef) && return Σ
+
+    Σ_out = similar(Σ)
+    fill!(Σ_out, NaN)
+    for j in axes(Σ, 1)
+        for i in axes(Σ, 2)
+            if basis_coef[j] && basis_coef[i]
+                Σ_out[j, i] = Σ[j, i]
+            end
+        end
+    end
+    return Σ_out
+end
+
 function CM.setkernelweights!(
         k::CM.HAC{T},
         X::OLSEstimator
