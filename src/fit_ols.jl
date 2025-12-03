@@ -19,21 +19,21 @@ Supports fixed effects but NOT instrumental variables.
   - `:qr`: More stable but ~2x slower (uses QR decomposition)
 """
 function fit_ols(df,
-                 formula::FormulaTerm;
-                 contrasts::Dict = Dict{Symbol, Any}(),
-                 weights::Union{Symbol, Nothing} = nothing,
-                 save::Union{Bool, Symbol} = :residuals,
-                 save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-                 dof_add::Integer = 0,
-                 method::Symbol = :cpu,
-                 factorization::Symbol = :auto,  # NEW: :auto, :chol, or :qr
-                 nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
-                 double_precision::Bool = method == :cpu,
-                 tol::Real = 1e-6,
-                 maxiter::Integer = 10000,
-                 drop_singletons::Bool = true,
-                 progress_bar::Bool = true,
-                 subset::Union{Nothing, AbstractVector} = nothing)
+        formula::FormulaTerm;
+        contrasts::Dict = Dict{Symbol, Any}(),
+        weights::Union{Symbol, Nothing} = nothing,
+        save::Union{Bool, Symbol} = :residuals,
+        save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        dof_add::Integer = 0,
+        method::Symbol = :cpu,
+        factorization::Symbol = :auto,  # NEW: :auto, :chol, or :qr
+        nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
+        double_precision::Bool = method == :cpu,
+        tol::Real = 1e-6,
+        maxiter::Integer = 10000,
+        drop_singletons::Bool = true,
+        progress_bar::Bool = true,
+        subset::Union{Nothing, AbstractVector} = nothing)
 
     # Validate keywords
     save, save_residuals = validate_save_keyword(save)
@@ -62,8 +62,9 @@ function fit_ols(df,
         wts = uweights(data_prep.nobs)
     end
 
-    subdf = DataFrame((; (x => disallowmissing(view(df[!, x], data_prep.esample))
-                          for x in data_prep.all_vars)...))
+    subdf = DataFrame((;
+        (x => disallowmissing(view(df[!, x], data_prep.esample))
+    for x in data_prep.all_vars)...))
     subfes = FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
 
     ##############################################################################
@@ -86,11 +87,13 @@ function fit_ols(df,
     rr = build_response(y, wts, Symbol(response_name))
 
     # Compute total sum of squares before demeaning
-    tss_total = compute_tss_total(rr.y, wts, data_prep.has_intercept | data_prep.has_fe_intercept)
+    tss_total = compute_tss_total(rr.y, wts, data_prep.has_intercept |
+                                             data_prep.has_fe_intercept)
 
     # Validate finite values
     all(isfinite, wts) || throw("Weights are not finite")
-    all(isfinite, rr.y) || throw("Some observations for the dependent variable are infinite")
+    all(isfinite, rr.y) ||
+        throw("Some observations for the dependent variable are infinite")
     all(isfinite, X) || throw("Some observations for the exogenous variables are infinite")
 
     ##############################################################################
@@ -106,10 +109,13 @@ function fit_ols(df,
         colnames = vcat(response_name, coef_names)
 
         # Partial out fixed effects (modifies cols in-place)
-        feM, iterations, converged, tss_partial, oldy, oldX =
-            partial_out_fixed_effects!(cols, colnames, subfes, wts, method, nthreads,
-                                       tol, maxiter, progress_bar, data_prep.save_fes,
-                                       data_prep.has_intercept, data_prep.has_fe_intercept, T)
+        feM, iterations,
+        converged,
+        tss_partial,
+        oldy,
+        oldX = partial_out_fixed_effects!(cols, colnames, subfes, wts, method, nthreads,
+            tol, maxiter, progress_bar, data_prep.save_fes,
+            data_prep.has_intercept, data_prep.has_fe_intercept, T)
     else
         iterations, converged = 0, true
         tss_partial = tss_total
@@ -174,7 +180,8 @@ function fit_ols(df,
     tss_for_fstat = data_prep.has_fes ? tss_partial : tss_total
     mss_val = tss_for_fstat - rss
     dof_model_ftest = dof_model - (data_prep.has_intercept & !data_prep.has_fe_intercept)
-    F_stat = dof_model_ftest > 0 ? (mss_val / dof_model_ftest) / (rss / dof_residual) : T(NaN)
+    F_stat = dof_model_ftest > 0 ? (mss_val / dof_model_ftest) / (rss / dof_residual) :
+             T(NaN)
     p_val = dof_model_ftest > 0 ? fdistccdf(dof_model_ftest, dof_residual, F_stat) : T(NaN)
 
     ##############################################################################
@@ -185,8 +192,9 @@ function fit_ols(df,
     if data_prep.save_fes && oldy !== nothing
         # Solve for FE estimates
         # Note: oldX was saved before collinearity detection, so filter by basis_coef
-        newfes, b, c = solve_coefficients!(oldy - oldX[:, basis_coef] * pp.beta[basis_coef], feM;
-                                          tol = tol, maxiter = maxiter)
+        newfes, b,
+        c = solve_coefficients!(oldy - oldX[:, basis_coef] * pp.beta[basis_coef], feM;
+            tol = tol, maxiter = maxiter)
 
         # Create DataFrame with FE estimates
         for fekey in data_prep.fekeys
@@ -221,7 +229,8 @@ function fit_ols(df,
     ##############################################################################
 
     # Handle Colon case for esample
-    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) : data_prep.esample
+    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) :
+                    data_prep.esample
 
     ##############################################################################
     ## Convert coefficient names to strings

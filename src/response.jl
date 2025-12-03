@@ -4,7 +4,7 @@ Response component for OLS estimation.
 Similar to GLM.jl's LmResp, this type stores the response vector,
 fitted values, and weights for a linear regression model.
 """
-mutable struct OLSResponse{T<:AbstractFloat}
+mutable struct OLSResponse{T <: AbstractFloat}
     y::Vector{T}                    # Original response vector
     mu::Vector{T}                   # Fitted values (ŷ = X*β)
     wts::Vector{T}                  # Weights (empty = unweighted)
@@ -28,7 +28,7 @@ Construct an OLSResponse object from response vector, weights, and name.
 - `OLSResponse{T}`: Response object with uninitialized fitted values
 """
 function build_response(y::Vector{T}, wts::AbstractWeights,
-                       response_name::Symbol) where T<:AbstractFloat
+        response_name::Symbol) where {T <: AbstractFloat}
     # Convert weights to vector (or empty for unweighted)
     wts_vec = wts isa UnitWeights ? T[] : convert(Vector{T}, wts.values)
 

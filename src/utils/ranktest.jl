@@ -28,15 +28,14 @@ Compute the Kleibergen-Paap rk statistic for testing weak instruments.
 - `r_kp`: The Kleibergen-Paap rk statistic
 """
 function ranktest(
-    Xendo_res::Matrix{T},
-    Z_res::Matrix{T},
-    Pi::Matrix{T},
-    vcov_type,
-    nobs::Int,
-    dof_small::Int,
-    dof_fes::Int
-) where T<:AbstractFloat
-
+        Xendo_res::Matrix{T},
+        Z_res::Matrix{T},
+        Pi::Matrix{T},
+        vcov_type,
+        nobs::Int,
+        dof_small::Int,
+        dof_fes::Int
+) where {T <: AbstractFloat}
     k = size(Xendo_res, 2)  # Number of endogenous variables
     l = size(Z_res, 2)      # Number of excluded instruments
 
@@ -145,13 +144,12 @@ end
 Compute the meat of the sandwich estimator for the rank test.
 """
 function _compute_meat(
-    moment_matrix::Matrix{T},
-    vcov_type,
-    nobs::Int,
-    dof_small::Int,
-    dof_fes::Int
-) where T<:AbstractFloat
-
+        moment_matrix::Matrix{T},
+        vcov_type,
+        nobs::Int,
+        dof_small::Int,
+        dof_fes::Int
+) where {T <: AbstractFloat}
     n = size(moment_matrix, 1)
 
     if vcov_type isa CovarianceMatrices.HR0
@@ -201,15 +199,14 @@ Returns (F_kp, p_kp) where:
 - p_kp is the p-value from chi-squared distribution
 """
 function compute_first_stage_fstat(
-    Xendo_res::Matrix{T},
-    Z_res::Matrix{T},
-    Pi::Matrix{T},
-    vcov_type,
-    nobs::Int,
-    dof_small::Int,
-    dof_fes::Int
-) where T<:AbstractFloat
-
+        Xendo_res::Matrix{T},
+        Z_res::Matrix{T},
+        Pi::Matrix{T},
+        vcov_type,
+        nobs::Int,
+        dof_small::Int,
+        dof_fes::Int
+) where {T <: AbstractFloat}
     k = size(Xendo_res, 2)  # Number of endogenous variables
     l = size(Z_res, 2)      # Number of excluded instruments
 

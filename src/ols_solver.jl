@@ -28,7 +28,7 @@ Returns a BitVector where `true` indicates the column is in the basis (non-colli
 - `BitVector`: Indicator of non-collinear columns
 """
 function detect_collinearity(X::Matrix{T}, has_intercept::Bool;
-                            tol::Real=1e-8) where T<:AbstractFloat
+        tol::Real = 1e-8) where {T <: AbstractFloat}
     n, k = size(X)
     basis = trues(k)
 
@@ -60,7 +60,7 @@ function detect_collinearity(X::Matrix{T}, has_intercept::Bool;
     # Mark collinear columns
     if rank < size(X_nonzero, 2)
         basis_indices = findall(basis)
-        for j in (rank+1):length(R_diag)
+        for j in (rank + 1):length(R_diag)
             basis[basis_indices[F.p[j]]] = false
         end
     end
@@ -80,7 +80,7 @@ Expand reduced coefficient vector to full size with NaN for collinear columns.
 # Returns
 - `Vector{T}`: Full coefficient vector with NaN for collinear columns
 """
-function expand_coef_nan(coef_reduced::Vector{T}, basis::BitVector) where T
+function expand_coef_nan(coef_reduced::Vector{T}, basis::BitVector) where {T}
     k = length(basis)
     coef_full = fill(T(NaN), k)
     coef_full[basis] = coef_reduced
@@ -98,7 +98,7 @@ Update full coefficient vector in-place with NaN for collinear columns.
 - `basis::BitVector`: Indicator of non-collinear columns
 """
 function update_coef_nan!(coef_full::Vector{T}, coef_reduced::Vector{T},
-                         basis::BitVector) where T
+        basis::BitVector) where {T}
     coef_full[basis] = coef_reduced
     coef_full[.!basis] .= T(NaN)
     return coef_full
@@ -116,7 +116,7 @@ Expand reduced vcov matrix to full size with NaN for collinear columns.
 # Returns
 - `Symmetric{T}`: Full vcov matrix with NaN rows/columns for collinear variables
 """
-function expand_vcov_nan(vcov_reduced::Symmetric{T}, basis::BitVector) where T
+function expand_vcov_nan(vcov_reduced::Symmetric{T}, basis::BitVector) where {T}
     k = length(basis)
     vcov_full = fill(T(NaN), k, k)
     vcov_full[basis, basis] = Matrix(vcov_reduced)
@@ -139,8 +139,8 @@ Build predictor object with factorization and detect collinearity.
 - `basis_coef::BitVector`: Indicator of non-collinear coefficients
 """
 function build_predictor(X::Matrix{T}, y::Vector{T},
-                        factorization::Symbol,
-                        has_intercept::Bool) where T<:AbstractFloat
+        factorization::Symbol,
+        has_intercept::Bool) where {T <: AbstractFloat}
     n, k = size(X)
 
     # Detect collinearity
@@ -206,8 +206,8 @@ Updates `pp.beta` and `rr.mu` in place.
 - `beta::Vector{T}`: Updated coefficient vector
 """
 function solve_ols!(rr::OLSResponse{T},
-                   pp::OLSPredictorChol{T},
-                   basis_coef::BitVector) where T
+        pp::OLSPredictorChol{T},
+        basis_coef::BitVector) where {T}
     # Get reduced X
     X_reduced = pp.X[:, basis_coef]
 
@@ -225,8 +225,8 @@ function solve_ols!(rr::OLSResponse{T},
 end
 
 function solve_ols!(rr::OLSResponse{T},
-                   pp::OLSPredictorQR{T},
-                   basis_coef::BitVector) where T
+        pp::OLSPredictorQR{T},
+        basis_coef::BitVector) where {T}
     # Get reduced X
     X_reduced = pp.X[:, basis_coef]
 
@@ -253,7 +253,7 @@ Compute X'X efficiently using BLAS syrk (symmetric rank-k update).
 # Returns
 - `Symmetric{T}`: X'X as a symmetric matrix
 """
-function compute_crossproduct(X::Matrix{T}) where T<:BlasReal
+function compute_crossproduct(X::Matrix{T}) where {T <: BlasReal}
     k = size(X, 2)
     XX = Matrix{T}(undef, k, k)
     BLAS.syrk!('U', 'T', one(T), X, zero(T), XX)
@@ -275,7 +275,7 @@ Compute residuals in-place: residuals = y - X*coef
 - `residuals::Vector{T}`: Updated residuals vector
 """
 function compute_residuals!(residuals::Vector{T}, y::Vector{T},
-                           X::Matrix{T}, coef::Vector{T}) where T
+        X::Matrix{T}, coef::Vector{T}) where {T}
     copyto!(residuals, y)
     # Remove collinear (NaN) coefficients
     valid = .!isnan.(coef)

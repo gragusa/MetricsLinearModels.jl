@@ -1,6 +1,5 @@
 const CM = CovarianceMatrices
 
-
 ##############################################################################
 ##
 ## CovarianceMatrices.jl Interface for Post-Estimation vcov
@@ -140,9 +139,11 @@ Compute multi-way cluster-robust variance-covariance matrix.
 function StatsBase.vcov(cluster_vars::Tuple, estimator_type::Symbol, m::OLSEstimator)
     # Look up all cluster variables from fes component
     cluster_vecs = Tuple(begin
-        haskey(m.fes.clusters, var) || _cluster_not_found_error(var, m)
-        m.fes.clusters[var]
-    end for var in cluster_vars)
+                             haskey(m.fes.clusters, var) ||
+                                 _cluster_not_found_error(var, m)
+                             m.fes.clusters[var]
+                         end
+    for var in cluster_vars)
 
     # Create appropriate estimator
     if estimator_type == :CR0
@@ -199,8 +200,6 @@ function _cluster_not_found_error(cluster_name::Symbol, m::OLSEstimator)
     """)
 end
 
-
-
 """
     bread(m::OLSEstimator)
 
@@ -214,14 +213,14 @@ bread(m::OLSEstimator) = invchol(m.pp)
 Compute leverage values (diagonal of hat matrix H = X(X'X)^(-1)X').
 Uses h_i = ||X_i * U^(-1)||^2 where X'X = U'U for efficiency.
 """
-function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where T
+function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where {T}
     # For Cholesky: X'X = U'U, so (X'X)^(-1) = U^(-1) * U^(-T)
     # h_i = X_i * U^(-1) * U^(-T) * X_i' = ||X_i * U^(-1)||^2
     X = modelmatrix(m)
     return vec(sum(abs2, X / m.pp.chol.U, dims = 2))
 end
 
-function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where T
+function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
     # For QR: X = QR, so X(X'X)^(-1)X' = QQ'
     # h_i = ||Q_i||^2
     X = modelmatrix(m)
@@ -229,14 +228,9 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where T
     return vec(sum(abs2, Q, dims = 2))
 end
 
-
-
-
-
-
 @noinline residualadjustment(k::CM.HR0, r::OLSEstimator) = 1.0
-@noinline residualadjustment(k::CM.HR1, r::OLSEstimator) = √nobs(r) /√dof_residual(r)
-@noinline residualadjustment(k::CM.HR2, r::OLSEstimator) = 1.0 ./(1 .- leverage(r)) .^ 0.5
+@noinline residualadjustment(k::CM.HR1, r::OLSEstimator) = √nobs(r) / √dof_residual(r)
+@noinline residualadjustment(k::CM.HR2, r::OLSEstimator) = 1.0 ./ (1 .- leverage(r)) .^ 0.5
 @noinline residualadjustment(k::CM.HR3, r::OLSEstimator) = 1.0 ./ (1 .- leverage(r))
 
 @noinline function residualadjustment(k::CM.HR4, r::OLSEstimator)

@@ -31,18 +31,17 @@ plot(layer(result[1], x="SepalWidth", y="SepalLength", Stat.binmean(n=10), Geom.
 ```
 """
 function partial_out(
-    @nospecialize(df), 
-    @nospecialize(f::FormulaTerm); 
-    @nospecialize(weights::Union{Symbol, Expr, Nothing} = nothing),
-    @nospecialize(add_mean = false),
-    @nospecialize(maxiter::Integer = 10000), 
-    @nospecialize(contrasts::Dict = Dict{Symbol, Any}()),
-    @nospecialize(method::Symbol = :cpu),
-    @nospecialize(double_precision::Bool = true),
-    @nospecialize(tol::Real = double_precision ? 1e-8 : 1e-6),
-    @nospecialize(align = true))
-
-    if  (ConstantTerm(0) ∉ eachterm(f.rhs)) & (ConstantTerm(1) ∉ eachterm(f.rhs))
+        @nospecialize(df),
+        @nospecialize(f::FormulaTerm);
+        @nospecialize(weights::Union{Symbol, Expr, Nothing} = nothing),
+        @nospecialize(add_mean = false),
+        @nospecialize(maxiter::Integer = 10000),
+        @nospecialize(contrasts::Dict = Dict{Symbol, Any}()),
+        @nospecialize(method::Symbol = :cpu),
+        @nospecialize(double_precision::Bool = true),
+        @nospecialize(tol::Real = double_precision ? 1e-8 : 1e-6),
+        @nospecialize(align = true))
+    if (ConstantTerm(0) ∉ eachterm(f.rhs)) & (ConstantTerm(1) ∉ eachterm(f.rhs))
         f = FormulaTerm(f.lhs, tuple(ConstantTerm(1), eachterm(f.rhs)...))
     end
     formula, formula_endo, formula_iv = parse_iv(f)
@@ -50,7 +49,6 @@ function partial_out(
     has_iv && throw("partial_out does not support instrumental variables")
     formula, formula_fes = parse_fe(formula)
     has_weights = weights !== nothing
-
 
     # create a dataframe without missing values & negative weights
     all_vars = StatsModels.termvars(formula)
@@ -67,7 +65,6 @@ function partial_out(
     fes, ids, ids_fes = parse_fixedeffect(df, formula_fes)
     has_fes = !isempty(fes)
 
-
     nobs = sum(esample)
     (nobs > 0) || throw("sample is empty")
     # Compute weights
@@ -81,7 +78,9 @@ function partial_out(
     if has_fes
         # in case some FixedEffect does not have interaction, remove the intercept
         if any(isa(fe.interaction, UnitWeights) for fe in fes)
-            formula = FormulaTerm(formula.lhs, tuple(ConstantTerm(0), (t for t in eachterm(formula.rhs) if t!= ConstantTerm(1))...))
+            formula = FormulaTerm(formula.lhs,
+                tuple(ConstantTerm(0), (t
+                for t in eachterm(formula.rhs) if t != ConstantTerm(1))...))
             has_fes_intercept = true
         end
         fes = FixedEffect[fe[esample] for fe in fes]
@@ -103,7 +102,8 @@ function partial_out(
         m = mean(Y, weights, dims = 1)
     end
     if has_fes
-        Y, b, c = solve_residuals!(Y, feM; maxiter = maxiter, tol = tol, progress_bar = false)
+        Y, b,
+        c = solve_residuals!(Y, feM; maxiter = maxiter, tol = tol, progress_bar = false)
         append!(iterations, b)
         append!(convergeds, c)
     end
@@ -113,7 +113,9 @@ function partial_out(
     formula_x_schema = apply_schema(formula_x, schema(formula_x, subdf, contrasts), StatisticalModel)
     X = convert(Matrix{Float64}, modelmatrix(formula_x_schema, subdf))
     if has_fes
-        _, b, c = solve_residuals!(eachcol(X), feM; maxiter = maxiter, tol = tol, progress_bar = false)
+        _, b,
+        c = solve_residuals!(
+            eachcol(X), feM; maxiter = maxiter, tol = tol, progress_bar = false)
         append!(iterations, b)
         append!(convergeds, c)
     end

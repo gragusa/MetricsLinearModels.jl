@@ -82,7 +82,8 @@ coeftable(model, :firm_id, :CR1)
 See also: [`iv`](@ref), [`OLSEstimator`](@ref)
 """
 function ols(df, formula::FormulaTerm; kwargs...)
-    has_iv(formula) && throw(ArgumentError("Formula contains instrumental variables. Use `iv(TSLS(), df, formula)` instead."))
+    has_iv(formula) &&
+        throw(ArgumentError("Formula contains instrumental variables. Use `iv(TSLS(), df, formula)` instead."))
     return fit_ols(df, formula; kwargs...)
 end
 
@@ -153,7 +154,8 @@ vcov((:firm_id, :year), :CR1, model)
 See also: [`ols`](@ref), [`TSLS`](@ref), [`LIML`](@ref), [`IVEstimator`](@ref)
 """
 function iv(estimator::AbstractIVEstimator, df, formula::FormulaTerm; kwargs...)
-    !has_iv(formula) && throw(ArgumentError("Formula does not contain instrumental variables. Use `ols(df, formula)` instead."))
+    !has_iv(formula) &&
+        throw(ArgumentError("Formula does not contain instrumental variables. Use `ols(df, formula)` instead."))
 
     if estimator isa LIML
         fit_liml(df, formula; kwargs...)  # Will error with "not implemented"

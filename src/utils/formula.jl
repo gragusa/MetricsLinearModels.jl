@@ -22,13 +22,16 @@ function parse_iv(@nospecialize(f::FormulaTerm))
         exos = setdiff(eachterm(term.rhs), both)
         # otherwise empty collection. Later, there will be check
         isempty(endos) && throw("There are no endogeneous variables")
-        length(exos) < length(endos) && throw("Model not identified. There must be at least as many instrumental variables as endogeneneous variables")
-		formula_endo = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), endos...))
-		formula_iv = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), exos...))
-        formula_exo = FormulaTerm(f.lhs, tuple((term for term in eachterm(f.rhs) if !isa(term, FormulaTerm))..., both...))
+        length(exos) < length(endos) &&
+            throw("Model not identified. There must be at least as many instrumental variables as endogeneneous variables")
+        formula_endo = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), endos...))
+        formula_iv = FormulaTerm(ConstantTerm(0), tuple(ConstantTerm(0), exos...))
+        formula_exo = FormulaTerm(
+            f.lhs, tuple((term for term in eachterm(f.rhs) if !isa(term, FormulaTerm))..., both...))
         return formula_exo, formula_endo, formula_iv
-	else
-    	return f, FormulaTerm(ConstantTerm(0), ConstantTerm(0)), FormulaTerm(ConstantTerm(0), ConstantTerm(0))
+    else
+        return f, FormulaTerm(ConstantTerm(0), ConstantTerm(0)),
+        FormulaTerm(ConstantTerm(0), ConstantTerm(0))
     end
 end
 
@@ -52,20 +55,18 @@ has_fe(@nospecialize(t::FormulaTerm)) = any(has_fe(x) for x in eachterm(t.rhs))
 
 function parse_fe(@nospecialize(f::FormulaTerm))
     if has_fe(f)
-        formula_main = FormulaTerm(f.lhs, Tuple(term for term in eachterm(f.rhs) if !has_fe(term)))
-        formula_fe = FormulaTerm(ConstantTerm(0), Tuple(term for term in eachterm(f.rhs) if has_fe(term)))
+        formula_main = FormulaTerm(f.lhs, Tuple(term
+        for term in eachterm(f.rhs) if !has_fe(term)))
+        formula_fe = FormulaTerm(ConstantTerm(0), Tuple(term
+        for term in eachterm(f.rhs) if has_fe(term)))
         return formula_main, formula_fe
     else
         return f, FormulaTerm(ConstantTerm(0), ConstantTerm(0))
     end
 end
 
-
 fesymbol(t::FixedEffectTerm) = t.x
 fesymbol(t::FunctionTerm{typeof(fe)}) = Symbol(t.args[1])
-
-
-
 
 """
     parse_fixedeffect(data, formula::FormulaTerm)
@@ -95,7 +96,7 @@ function parse_fixedeffect(data, @nospecialize(formula::FormulaTerm))
 end
 
 # Method for external packages
-function parse_fixedeffect(data, @nospecialize(ts::NTuple{N, AbstractTerm})) where N
+function parse_fixedeffect(data, @nospecialize(ts::NTuple{N, AbstractTerm})) where {N}
     fes = FixedEffect[]
     ids = Symbol[]
     fekeys = Symbol[]
@@ -109,7 +110,10 @@ function parse_fixedeffect(data, @nospecialize(ts::NTuple{N, AbstractTerm})) whe
     end
     if !isempty(fes)
         if any(fe.interaction isa UnitWeights for fe in fes)
-            ts = (InterceptTerm{false}(), (term for term in eachterm(ts) if !isa(term, Union{ConstantTerm,InterceptTerm}) && !has_fe(term))...)
+            ts = (InterceptTerm{false}(),
+                (term
+                for term in eachterm(ts)
+                if !isa(term, Union{ConstantTerm, InterceptTerm}) && !has_fe(term))...)
         else
             ts = Tuple(term for term in eachterm(ts) if !has_fe(term))
         end
@@ -148,6 +152,7 @@ function _multiply(data, ss::AbstractVector)
         # do NOT use ! since it would modify the vector
         return convert(AbstractVector{Float64}, replace(Tables.getcolumn(data, ss[1]), missing => 0))
     else
-        return convert(AbstractVector{Float64}, replace!(.*((Tables.getcolumn(data, x) for x in ss)...), missing => 0))
+        return convert(AbstractVector{Float64},
+            replace!(.*((Tables.getcolumn(data, x) for x in ss)...), missing => 0))
     end
 end
