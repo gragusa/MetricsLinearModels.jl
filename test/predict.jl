@@ -1,4 +1,5 @@
 using MetricsLinearModels, DataFrames, CategoricalArrays, CSV, Test
+include("gpu_utils.jl")
 
 
 
@@ -389,12 +390,9 @@ end
 @testset "gpu" begin
 	df = DataFrame(CSV.File(joinpath(dirname(pathof(MetricsLinearModels)), "../dataset/Cigar.csv")))
 	methods_vec = [:cpu]
-	if CUDA.functional()
-		push!(methods_vec, :CUDA)
+	if GPU_AVAILABLE
+		push!(methods_vec, GPU_METHOD)
 	end
-	#if Metal.functional()
-	#	push!(methods_vec, :Metal)
-	#end
 	for method in methods_vec
 		local model = @formula Sales ~ Price + fe(Year)
 		local result = ols(df, model, save = true, method = method, double_precision = false)

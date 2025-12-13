@@ -154,7 +154,177 @@ Returns the Hessian of the least squares objective function: X'X/n.
 
 ##############################################################################
 ##
+## CovarianceMatrices.jl aVar Interface for IVEstimator
+##
+##############################################################################
+
+# Local alias for CovarianceMatrices (also defined in covariance.jl for OLS)
+const _CM = CovarianceMatrices
+
+"""
+    bread(m::IVEstimator)
+
+Compute (X'X)^(-1), the "bread" of the sandwich variance estimator for IV.
+Uses the predicted endogenous variables (Xhat) in the design matrix.
+"""
+bread(m::IVEstimator) = m.postestimation.invXX
+
+"""
+    leverage(m::IVEstimator)
+
+Compute leverage values (diagonal of hat matrix) for IV models.
+For IV: h_i = X_i * (X'X)^(-1) * X_i' where X contains predicted endogenous.
+"""
+function leverage(m::IVEstimator)
+    isnothing(m.postestimation) && error("Model does not have post-estimation data stored.")
+    X = m.postestimation.X
+    invXX = m.postestimation.invXX
+    # h_i = X_i * invXX * X_i'
+    return vec(sum(X .* (X * invXX), dims=2))
+end
+
+# Residual adjustments for HC/HR estimators
+# Note: HC0 = HR0 and HC1 = HR1 in CovarianceMatrices.jl (type aliases)
+@noinline residualadjustment(k::_CM.HR0, m::IVEstimator) = 1.0  # Also handles HC0
+@noinline residualadjustment(k::_CM.HR1, m::IVEstimator) = sqrt(nobs(m) / dof_residual(m))  # Also handles HC1
+@noinline residualadjustment(k::_CM.HR2, m::IVEstimator) = 1.0 ./ sqrt.(1 .- leverage(m))  # Also handles HC2
+@noinline residualadjustment(k::_CM.HR3, m::IVEstimator) = 1.0 ./ (1 .- leverage(m))  # Also handles HC3
+
+@noinline function residualadjustment(k::_CM.HC4, m::IVEstimator)
+    n = nobs(m)
+    h = leverage(m)
+    p = round(Int, sum(h))
+    adj = similar(h)
+    @inbounds for j in eachindex(h)
+        delta = min(4.0, n * h[j] / p)
+        adj[j] = 1 / (1 - h[j])^(delta / 2)
+    end
+    adj
+end
+
+@noinline function residualadjustment(k::_CM.HC5, m::IVEstimator)
+    n = nobs(m)
+    h = leverage(m)
+    p = round(Int, sum(h))
+    mx = max(n * 0.7 * maximum(h) / p, 4.0)
+    adj = similar(h)
+    @inbounds for j in eachindex(h)
+        alpha = min(n * h[j] / p, mx)
+        adj[j] = 1 / (1 - h[j])^(alpha / 4)
+    end
+    adj
+end
+
+# Cluster-robust residual adjustments
+@noinline residualadjustment(k::_CM.CR0, m::IVEstimator) = 1.0
+@noinline residualadjustment(k::_CM.CR1, m::IVEstimator) = 1.0
+
+# CR2 and CR3 for IV - leverage-adjusted cluster-robust
+function residualadjustment(k::_CM.CR2, m::IVEstimator)
+    @assert length(k.g) == 1 "CR2 for IV currently only supports single-way clustering"
+    g = k.g[1]
+    X = m.postestimation.X
+    resid = m.residuals
+    u = copy(resid)
+    XX = bread(m)
+    for groups in 1:g.ngroups
+        ind = findall(x -> x == groups, g)
+        Xg = view(X, ind, :)
+        ug = view(u, ind)
+        Hgg = Xg * XX * Xg'
+        # Apply (I - H_gg)^(-1/2) to residuals
+        F = cholesky!(Symmetric(I - Hgg); check=false)
+        if issuccess(F)
+            ldiv!(ug, F.L, ug)
+        end
+    end
+    return u ./ resid
+end
+
+function residualadjustment(k::_CM.CR3, m::IVEstimator)
+    @assert length(k.g) == 1 "CR3 for IV currently only supports single-way clustering"
+    g = k.g[1]
+    X = m.postestimation.X
+    resid = m.residuals
+    u = copy(resid)
+    XX = bread(m)
+    for groups in 1:g.ngroups
+        ind = findall(g .== groups)
+        Xg = view(X, ind, :)
+        ug = view(u, ind)
+        Hgg = Xg * XX * Xg'
+        # Apply (I - H_gg)^(-1) to residuals
+        F = cholesky!(Symmetric(I - Hgg); check=false)
+        if issuccess(F)
+            ldiv!(ug, F, ug)
+        end
+    end
+    return u ./ resid
+end
+
+"""
+    CovarianceMatrices.aVar(k, m::IVEstimator)
+
+Compute the asymptotic variance matrix for IV estimation.
+"""
+function _CM.aVar(
+        k::K,
+        m::IVEstimator;
+        demean = false,
+        prewhite = false,
+        scale = true,
+        kwargs...
+) where {K <: _CM.AbstractAsymptoticVarianceEstimator}
+    isnothing(m.postestimation) && error("Model does not have post-estimation data stored.")
+    isnothing(m.residuals) && error("Model does not have residuals stored.")
+
+    # Compute adjusted moment matrix
+    u = residualadjustment(k, m)
+    M = m.postestimation.X .* m.residuals
+    if !(u isa Number && u == 1.0)
+        M = M .* u
+    end
+
+    # Compute aVar using CovarianceMatrices
+    Σ = _CM.aVar(k, M; demean=demean, prewhite=prewhite, scale=scale)
+    return Σ
+end
+
+# Disambiguating method for cluster-robust estimators
+function _CM.aVar(
+        k::K,
+        m::IVEstimator;
+        demean = false,
+        prewhite = false,
+        scale = true,
+        kwargs...
+) where {K <: _CM.CR}
+    isnothing(m.postestimation) && error("Model does not have post-estimation data stored.")
+    isnothing(m.residuals) && error("Model does not have residuals stored.")
+
+    # Compute adjusted moment matrix
+    u = residualadjustment(k, m)
+    M = m.postestimation.X .* m.residuals
+    if !(u isa Number && u == 1.0)
+        M = M .* u
+    end
+
+    # Compute aVar using CovarianceMatrices
+    Σ = _CM.aVar(k, M; demean=demean, prewhite=prewhite, scale=scale)
+    return Σ
+end
+
+##############################################################################
+##
 ## Post-Estimation vcov Methods
+##
+## Primary API (CovarianceMatrices.jl standard):
+##   vcov(CR1(cluster_vec), model)
+##   stderror(CR1(cluster_vec), model)
+##
+## Convenience API (for stored cluster variables):
+##   vcov(:ClusterVar, :CR1, model)   # looks up cluster from model
+##   stderror(:ClusterVar, :CR1, model)
 ##
 ##############################################################################
 
@@ -175,11 +345,15 @@ model = iv(TSLS(), df, @formula(y ~ x + (endo ~ instrument)))
 # Heteroskedasticity-robust
 vcov(HC3(), model)
 
-# Cluster-robust using symbol (looks up stored cluster variable)
-vcov(:firm_id, :CR1, model)
+# Cluster-robust (standard CovarianceMatrices.jl API)
+vcov(CR1(df.firm_id[model.esample]), model)
 
 # Two-way clustering
-vcov((:firm_id, :year), :CR1, model)
+vcov(CR1((df.firm_id[model.esample], df.year[model.esample])), model)
+
+# Convenience API (for stored cluster variables - avoids manual subsetting)
+model = iv(TSLS(), df, @formula(y ~ x + (endo ~ inst)), save_cluster=:firm_id)
+vcov(:firm_id, :CR1, model)
 ```
 """
 function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::IVEstimator{T}) where T
@@ -188,87 +362,138 @@ function StatsBase.vcov(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimat
 
     n = nobs(m)
     k = dof(m)
-    invXX = m.postestimation.invXX
+    B = bread(m)
     resid = m.residuals
 
     # Homoskedastic variance
-    if ve isa CovarianceMatrices.HR1 || ve isa CovarianceMatrices.HR0
+    if ve isa CovarianceMatrices.HR0
+        σ² = sum(abs2, resid) / n
+        return Symmetric(σ² * B)
+    elseif ve isa CovarianceMatrices.HR1
         σ² = sum(abs2, resid) / dof_residual(m)
-        return Symmetric(σ² * invXX)
+        return Symmetric(σ² * B)
     end
 
-    # Heteroskedasticity-robust (HC0, HC1, etc.)
-    X = m.postestimation.X
-    meat = X' * Diagonal(resid.^2) * X
+    # Sandwich variance: V = B * A * B where A = aVar(k, m)
+    A = _CM.aVar(ve, m)
 
-    # Degree of freedom adjustment for HC1
-    scale = if ve isa CovarianceMatrices.HC1
-        n / (n - k)
-    elseif ve isa CovarianceMatrices.HC0
-        one(T)
+    # Scale factor depends on estimator type
+    # Note: HC1 = HR1 in CovarianceMatrices.jl
+    scale = if ve isa _CM.HR1
+        # HC1/HR1: n/(n-k) adjustment
+        p_total = dof(m) + dof_fes(m)
+        n * dof_residual(m) / (n - p_total)
+    elseif ve isa Union{_CM.CR0, _CM.CR1, _CM.CR2, _CM.CR3}
+        # Cluster-robust: use fixest-style correction
+        _cluster_robust_scale_iv(ve, m, n)
     else
-        # Default to HC1 scaling for other types
-        n / (n - k)
+        # HC0/HR0, HC2/HR2, HC3/HR3, HC4, HC5: no additional scale (adjustment in residualadjustment)
+        convert(T, n)
     end
 
-    return Symmetric(scale * invXX * meat * invXX)
+    Σ = scale .* B * A * B
+    return Symmetric(Σ)
+end
+
+"""
+    _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
+
+Compute the scale factor for cluster-robust variance estimation for IV models.
+Uses fixest-style small sample correction.
+"""
+function _cluster_robust_scale_iv(k::_CM.CR, m::IVEstimator, n::Int)
+    cluster_groups = k.g
+    G = minimum(g.ngroups for g in cluster_groups)
+
+    # G/(G-1) adjustment - only for CR1, CR2, CR3
+    G_adj = k isa _CM.CR0 ? 1.0 : G / (G - 1)
+
+    # For IV, K = k (number of params) - we don't have FE nesting logic for IV
+    # This is a simpler case since IV models typically don't have absorbed FE DOF
+    K = dof(m)
+    K_adj = (n - 1) / (n - K)
+
+    return convert(Float64, n * G_adj * K_adj)
 end
 
 ##############################################################################
 ##
-## Convenience Methods for Cluster-Robust with Symbol Lookup
+## Symbol-Based Cluster-Robust Variance API
+##
+## When CR types are constructed with Symbol(s) instead of data vectors,
+## these methods look up the cluster data from the model's stored clusters.
+##
+## Usage:
+##   vcov(CR1(:StateID), model)           # single cluster
+##   vcov(CR1(:StateID, :YearID), model)  # multi-way clustering
 ##
 ##############################################################################
 
 """
-    vcov(cluster_var::Symbol, estimator_type::Symbol, m::IVEstimator)
+    _lookup_cluster_vecs_iv(cluster_syms::Tuple{Vararg{Symbol}}, m::IVEstimator)
 
-Compute cluster-robust variance-covariance matrix using a stored cluster variable.
+Look up cluster vectors from stored cluster data in the IV model.
+Returns a tuple of vectors corresponding to the requested cluster symbols.
 """
-function StatsBase.vcov(cluster_var::Symbol, estimator_type::Symbol, m::IVEstimator)
-    # Look up cluster variable
-    haskey(m.postestimation.cluster_vars, cluster_var) || _cluster_not_found_error(cluster_var, m)
-    cluster_vec = m.postestimation.cluster_vars[cluster_var]
-
-    if estimator_type == :CR0
-        ve = CovarianceMatrices.CR0(cluster_vec)
-    elseif estimator_type == :CR1
-        ve = CovarianceMatrices.CR1(cluster_vec)
-    elseif estimator_type == :CR2
-        ve = CovarianceMatrices.CR2(cluster_vec)
-    elseif estimator_type == :CR3
-        ve = CovarianceMatrices.CR3(cluster_vec)
-    else
-        error("Unknown cluster-robust estimator type: $estimator_type. Use :CR0, :CR1, :CR2, or :CR3")
-    end
-
-    return vcov(ve, m)
+function _lookup_cluster_vecs_iv(cluster_syms::Tuple{Vararg{Symbol}}, m::IVEstimator)
+    return Tuple(begin
+        haskey(m.postestimation.cluster_vars, name) || _cluster_not_found_error(name, m)
+        m.postestimation.cluster_vars[name]
+    end for name in cluster_syms)
 end
 
 """
-    vcov(cluster_vars::Tuple, estimator_type::Symbol, m::IVEstimator)
+    vcov(v::CovarianceMatrices.CR0{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
 
-Compute multi-way cluster-robust variance-covariance matrix.
+Compute cluster-robust variance with CR0 estimator using stored cluster variable(s).
+
+# Examples
+```julia
+model = iv(TSLS(), df, @formula(y ~ x + (endo ~ inst)), save_cluster = :firm_id)
+vcov(CR0(:firm_id), model)
+vcov(CR0(:firm_id, :year), model)  # multi-way
+```
 """
-function StatsBase.vcov(cluster_vars::Tuple, estimator_type::Symbol, m::IVEstimator)
-    cluster_vecs = Tuple(begin
-        haskey(m.postestimation.cluster_vars, var) || _cluster_not_found_error(var, m)
-        m.postestimation.cluster_vars[var]
-    end for var in cluster_vars)
+function CovarianceMatrices.vcov(v::CovarianceMatrices.CR0{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs_iv(v.g, m)
+    return vcov(CovarianceMatrices.CR0(cluster_vecs), m)
+end
 
-    if estimator_type == :CR0
-        ve = CovarianceMatrices.CR0(cluster_vecs)
-    elseif estimator_type == :CR1
-        ve = CovarianceMatrices.CR1(cluster_vecs)
-    elseif estimator_type == :CR2
-        ve = CovarianceMatrices.CR2(cluster_vecs)
-    elseif estimator_type == :CR3
-        ve = CovarianceMatrices.CR3(cluster_vecs)
-    else
-        error("Unknown cluster-robust estimator type: $estimator_type. Use :CR0, :CR1, :CR2, or :CR3")
-    end
+"""
+    vcov(v::CovarianceMatrices.CR1{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
 
-    return vcov(ve, m)
+Compute cluster-robust variance with CR1 estimator using stored cluster variable(s).
+
+# Examples
+```julia
+model = iv(TSLS(), df, @formula(y ~ x + (endo ~ inst)), save_cluster = :firm_id)
+vcov(CR1(:firm_id), model)
+vcov(CR1(:firm_id, :year), model)  # multi-way
+```
+"""
+function CovarianceMatrices.vcov(v::CovarianceMatrices.CR1{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs_iv(v.g, m)
+    return vcov(CovarianceMatrices.CR1(cluster_vecs), m)
+end
+
+"""
+    vcov(v::CovarianceMatrices.CR2{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+
+Compute cluster-robust variance with CR2 (leverage-adjusted) estimator using stored cluster variable(s).
+"""
+function CovarianceMatrices.vcov(v::CovarianceMatrices.CR2{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs_iv(v.g, m)
+    return vcov(CovarianceMatrices.CR2(cluster_vecs), m)
+end
+
+"""
+    vcov(v::CovarianceMatrices.CR3{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+
+Compute cluster-robust variance with CR3 (squared leverage) estimator using stored cluster variable(s).
+"""
+function CovarianceMatrices.vcov(v::CovarianceMatrices.CR3{T}, m::IVEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs_iv(v.g, m)
+    return vcov(CovarianceMatrices.CR3(cluster_vecs), m)
 end
 
 """
@@ -278,14 +503,6 @@ Compute standard errors using a specified variance estimator.
 """
 function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::IVEstimator)
     return sqrt.(diag(vcov(ve, m)))
-end
-
-function StatsBase.stderror(cluster_var::Symbol, estimator_type::Symbol, m::IVEstimator)
-    return sqrt.(diag(vcov(cluster_var, estimator_type, m)))
-end
-
-function StatsBase.stderror(cluster_vars::Tuple, estimator_type::Symbol, m::IVEstimator)
-    return sqrt.(diag(vcov(cluster_vars, estimator_type, m)))
 end
 
 ##############################################################################
@@ -301,9 +518,9 @@ function _cluster_not_found_error(cluster_name::Symbol, m::IVEstimator)
 
     Available cluster variables: :$available
 
-    To use a different cluster variable, either:
-      1. Re-run regression with save_cluster=:$cluster_name
-      2. Use manual subsetting: vcov(CR1(esample(model, df.$cluster_name)), model)
+    To use this cluster variable, either:
+      1. Re-fit with save_cluster=:$cluster_name
+      2. Use data directly: vcov(CR1(df.$cluster_name[model.esample]), model)
     """)
 end
 

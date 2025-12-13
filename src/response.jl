@@ -3,10 +3,12 @@ Response component for OLS estimation.
 
 Similar to GLM.jl's LmResp, this type stores the response vector,
 fitted values, and weights for a linear regression model.
+
+When `save=:minimal` is used, `y` and `mu` may be `nothing` to save memory.
 """
 mutable struct OLSResponse{T<:AbstractFloat}
-    y::Vector{T}                    # Original response vector
-    mu::Vector{T}                   # Fitted values (ŷ = X*β)
+    y::Union{Vector{T}, Nothing}    # Original response vector (nothing if save=:minimal)
+    mu::Union{Vector{T}, Nothing}   # Fitted values ŷ = X*β (nothing if save=:minimal)
     wts::Vector{T}                  # Weights (empty = unweighted)
     offset::Vector{T}               # Offset (empty = no offset, for GLM compatibility)
 

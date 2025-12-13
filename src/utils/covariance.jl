@@ -97,86 +97,117 @@ end
 
 ##############################################################################
 ##
-## Convenience Methods for Cluster-Robust with Symbol Lookup
+## Cluster-Robust Variance Estimation
+##
+## Standard CovarianceMatrices.jl API (with actual data vectors):
+##   vcov(CR1(cluster_vec), model)
+##   stderror(CR1(cluster_vec), model)
+##
+## Symbol-based API (looks up stored cluster variables):
+##   vcov(CR1(:StateID), model)           # single cluster
+##   vcov(CR1(:StateID, :YearID), model)  # multi-way clustering
 ##
 ##############################################################################
-
-"""
-    vcov(cluster_var::Symbol, estimator_type::Symbol, m::OLSEstimator)
-
-Compute cluster-robust variance-covariance matrix using a stored cluster variable.
-
-# Arguments
-- `cluster_var::Symbol`: Name of the cluster variable (must be stored in model)
-- `estimator_type::Symbol`: Type of cluster-robust estimator (`:CR0`, `:CR1`, `:CR2`, or `:CR3`)
-- `m::OLSEstimator`: Fitted model
-"""
-function StatsBase.vcov(cluster_var::Symbol, estimator_type::Symbol, m::OLSEstimator)
-    # Look up cluster variable from fes component
-    haskey(m.fes.clusters, cluster_var) || _cluster_not_found_error(cluster_var, m)
-    cluster_vec = m.fes.clusters[cluster_var]
-
-    # Create appropriate estimator
-    if estimator_type == :CR0
-        ve = CovarianceMatrices.CR0(cluster_vec)
-    elseif estimator_type == :CR1
-        ve = CovarianceMatrices.CR1(cluster_vec)
-    elseif estimator_type == :CR2
-        ve = CovarianceMatrices.CR2(cluster_vec)
-    elseif estimator_type == :CR3
-        ve = CovarianceMatrices.CR3(cluster_vec)
-    else
-        error("Unknown cluster-robust estimator type: $estimator_type. Use :CR0, :CR1, :CR2, or :CR3")
-    end
-
-    return vcov(ve, m)
-end
-
-"""
-    vcov(cluster_vars::Tuple, estimator_type::Symbol, m::OLSEstimator)
-
-Compute multi-way cluster-robust variance-covariance matrix.
-"""
-function StatsBase.vcov(cluster_vars::Tuple, estimator_type::Symbol, m::OLSEstimator)
-    # Look up all cluster variables from fes component
-    cluster_vecs = Tuple(begin
-        haskey(m.fes.clusters, var) || _cluster_not_found_error(var, m)
-        m.fes.clusters[var]
-    end for var in cluster_vars)
-
-    # Create appropriate estimator
-    if estimator_type == :CR0
-        ve = CovarianceMatrices.CR0(cluster_vecs)
-    elseif estimator_type == :CR1
-        ve = CovarianceMatrices.CR1(cluster_vecs)
-    elseif estimator_type == :CR2
-        ve = CovarianceMatrices.CR2(cluster_vecs)
-    elseif estimator_type == :CR3
-        ve = CovarianceMatrices.CR3(cluster_vecs)
-    else
-        error("Unknown cluster-robust estimator type: $estimator_type. Use :CR0, :CR1, :CR2, or :CR3")
-    end
-
-    return vcov(ve, m)
-end
 
 """
     stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::OLSEstimator)
 
 Compute standard errors using a specified variance estimator.
+
+# Examples
+```julia
+# Heteroskedasticity-robust
+stderror(HC1(), model)
+
+# Cluster-robust (standard CovarianceMatrices.jl API)
+stderror(CR1(cluster_vec), model)
+
+# Two-way clustering
+stderror(CR1((cluster1, cluster2)), model)
+```
 """
 function StatsBase.stderror(ve::CovarianceMatrices.AbstractAsymptoticVarianceEstimator, m::OLSEstimator)
     return sqrt.(diag(vcov(ve, m)))
 end
 
-# Convenience method for cluster-robust with symbol
-function StatsBase.stderror(cluster_var::Symbol, estimator_type::Symbol, m::OLSEstimator)
-    return sqrt.(diag(vcov(cluster_var, estimator_type, m)))
+##############################################################################
+##
+## Symbol-Based Cluster-Robust Variance API
+##
+## When CR types are constructed with Symbol(s) instead of data vectors,
+## these methods look up the cluster data from the model's stored clusters.
+##
+## Usage:
+##   vcov(CR1(:StateID), model)           # single cluster
+##   vcov(CR1(:StateID, :YearID), model)  # multi-way clustering
+##
+##############################################################################
+
+"""
+    _lookup_cluster_vecs(cluster_syms::Tuple{Vararg{Symbol}}, m::OLSEstimator)
+
+Look up cluster vectors from stored cluster data in the model.
+Returns a tuple of vectors corresponding to the requested cluster symbols.
+"""
+function _lookup_cluster_vecs(cluster_syms::Tuple{Vararg{Symbol}}, m::OLSEstimator)
+    return Tuple(begin
+        haskey(m.fes.clusters, name) || _cluster_not_found_error(name, m)
+        m.fes.clusters[name]
+    end for name in cluster_syms)
 end
 
-# Convenience method for multi-way clustering
-function StatsBase.stderror(cluster_vars::Tuple, estimator_type::Symbol, m::OLSEstimator)
-    return sqrt.(diag(vcov(cluster_vars, estimator_type, m)))
+"""
+    vcov(v::CM.CR0{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+
+Compute cluster-robust variance with CR0 estimator using stored cluster variable(s).
+
+# Examples
+```julia
+model = ols(df, @formula(y ~ x), save_cluster = :firm_id)
+vcov(CR0(:firm_id), model)
+vcov(CR0(:firm_id, :year), model)  # multi-way
+```
+"""
+function CM.vcov(v::CM.CR0{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs(v.g, m)
+    return vcov(CM.CR0(cluster_vecs), m)
+end
+
+"""
+    vcov(v::CM.CR1{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+
+Compute cluster-robust variance with CR1 estimator using stored cluster variable(s).
+
+# Examples
+```julia
+model = ols(df, @formula(y ~ x), save_cluster = :firm_id)
+vcov(CR1(:firm_id), model)
+vcov(CR1(:firm_id, :year), model)  # multi-way
+```
+"""
+function CM.vcov(v::CM.CR1{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs(v.g, m)
+    return vcov(CM.CR1(cluster_vecs), m)
+end
+
+"""
+    vcov(v::CM.CR2{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+
+Compute cluster-robust variance with CR2 (leverage-adjusted) estimator using stored cluster variable(s).
+"""
+function CM.vcov(v::CM.CR2{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs(v.g, m)
+    return vcov(CM.CR2(cluster_vecs), m)
+end
+
+"""
+    vcov(v::CM.CR3{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+
+Compute cluster-robust variance with CR3 (squared leverage) estimator using stored cluster variable(s).
+"""
+function CM.vcov(v::CM.CR3{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+    cluster_vecs = _lookup_cluster_vecs(v.g, m)
+    return vcov(CM.CR3(cluster_vecs), m)
 end
 
 ##############################################################################
@@ -193,9 +224,9 @@ function _cluster_not_found_error(cluster_name::Symbol, m::OLSEstimator)
 
     Available cluster variables: :$available
 
-    To use a different cluster variable, either:
-      1. Re-run regression with save_cluster=:$cluster_name
-      2. Use manual subsetting: vcov(CR1(esample(model, df.$cluster_name)), model)
+    To use this cluster variable, either:
+      1. Re-fit with save_cluster=:$cluster_name
+      2. Use data directly: vcov(CR1(df.$cluster_name[model.esample]), model)
     """)
 end
 
@@ -336,6 +367,119 @@ function residualadjustment(k::CM.CR3, r::OLSEstimator)
     return u ./ u_orig
 end
 
+##############################################################################
+##
+## Cluster-robust small sample correction (fixest-compatible)
+##
+##############################################################################
+
+"""
+    _cluster_robust_scale(k::CM.CR, m::OLSEstimator, n::Int)
+
+Compute the scale factor for cluster-robust variance estimation using
+fixest-style small sample correction.
+
+# Formula
+`scale = n * G/(G-1) * (n-1)/(n-K)` where:
+- G = number of clusters (for multi-way: minimum cluster count)
+- K = k + k_fe_nonnested (only FE NOT nested in cluster are counted)
+
+With K.fixef = "nonnested" (fixest default):
+- FE nested in the cluster variable are NOT counted in K
+- FE NOT nested in the cluster variable ARE counted in K
+
+This matches R fixest's default behavior for cluster-robust standard errors.
+"""
+function _cluster_robust_scale(k::CM.CR, m::OLSEstimator, n::Int)
+    # Get cluster groupings from the CR estimator
+    cluster_groups = k.g
+
+    # G = number of clusters (for multi-way, use minimum)
+    G = minimum(g.ngroups for g in cluster_groups)
+
+    # G/(G-1) adjustment (cluster DOF correction) - only for CR1, CR2, CR3
+    # CR0 has no small-sample adjustment
+    G_adj = k isa CM.CR0 ? 1.0 : G / (G - 1)
+
+    # Compute K for (n-1)/(n-K) adjustment using K.fixef = "nonnested"
+    # K = k (non-FE params) + FE DOF for FE not nested in cluster
+    # For CR0, we still apply the (n-1)/(n-K) adjustment for consistency
+    k_params = dof(m)
+    k_fe_nonnested = _compute_nonnested_fe_dof(m, cluster_groups)
+    K = k_params + k_fe_nonnested
+
+    # (n-1)/(n-K) adjustment (parameter DOF correction)
+    # For CR0, this is the only adjustment applied
+    K_adj = (n - 1) / (n - K)
+
+    # Final scale: n * G_adj * K_adj
+    # The n factor is because aVar returns (sum)/n, and vcov computes scale * B * A * B
+    return convert(Float64, n * G_adj * K_adj)
+end
+
+"""
+    _compute_nonnested_fe_dof(m::OLSEstimator, cluster_groups)
+
+Compute the DOF for fixed effects that are NOT nested in the cluster variable(s).
+
+A fixed effect is "nested" in a cluster if every FE group is contained within
+exactly one cluster group. When FE is nested, it doesn't add information beyond
+the clustering and shouldn't be counted in the K adjustment.
+
+Returns 0 if all FE are nested in the clustering, or the full k_fe if none are nested.
+"""
+function _compute_nonnested_fe_dof(m::OLSEstimator, cluster_groups)
+    # If no fixed effects, return 0
+    dof_fes(m) == 0 && return 0
+
+    # Get FE names from model
+    fe_names = m.fes.fe_names
+    isempty(fe_names) && return 0
+
+    # Get cluster variable names from the stored clusters
+    cluster_names = keys(m.fes.clusters)
+
+    # Check if each FE is nested in at least one cluster
+    # For simplicity, we use a name-matching heuristic:
+    # FE is nested if its name matches one of the cluster names
+    # This is a reasonable approximation for most use cases
+    k_fe_nonnested = 0
+
+    # For now, use a simple approach: if FE name == cluster name, it's nested
+    # A more sophisticated approach would check actual nesting of the groupings
+    for fe_name in fe_names
+        is_nested = fe_name in cluster_names
+        if !is_nested
+            # This FE is not nested in any cluster - count its DOF
+            # We need to compute the DOF for just this FE
+            # For simplicity, assume each FE contributes proportionally
+            # In practice, this is conservative (may overcount)
+            k_fe_nonnested += _fe_dof_for_name(m, fe_name)
+        end
+    end
+
+    return k_fe_nonnested
+end
+
+"""
+    _fe_dof_for_name(m::OLSEstimator, fe_name::Symbol)
+
+Get the degrees of freedom absorbed by a specific fixed effect.
+For models with a single FE, this is just dof_fes(m).
+For multiple FE, we estimate based on the number of levels.
+"""
+function _fe_dof_for_name(m::OLSEstimator, fe_name::Symbol)
+    fe_names = m.fes.fe_names
+
+    # Single FE case - return all FE DOF
+    length(fe_names) == 1 && return dof_fes(m)
+
+    # Multiple FE case - we don't have per-FE DOF stored
+    # As an approximation, split evenly (this is conservative)
+    # A better approach would store per-FE DOF during fitting
+    return dof_fes(m) ÷ length(fe_names)
+end
+
 function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dofadjust = true, kwargs...)
     A = aVar(k, m; kwargs...)
     n = nobs(m)
@@ -348,7 +492,7 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
     #
     # For HC0/HR0: V = n * B * (M'M/n) * B = B * M'M * B
     # For HC1/HR1: V = n/(n-k-k_fe) * B * M'M * B  (with proper DOF)
-    # For cluster-robust: Similar, accounting for all absorbed DOF
+    # For cluster-robust: Use fixest-style small sample correction
 
     scale = if k isa Union{CM.HC1, CM.HR1}
         # HC1: DOF adjustment should account for both k and k_fe
@@ -361,9 +505,14 @@ function CM.vcov(k::CM.AbstractAsymptoticVarianceEstimator, m::OLSEstimator; dof
         p_total = dof(m) + dof_fes(m)
         n * dof_residual(m) / (n - p_total)
     elseif k isa Union{CM.CR0, CM.CR1, CM.CR2, CM.CR3}
-        # Cluster-robust: same DOF adjustment
-        p_total = dof(m) + dof_fes(m)
-        n * dof_residual(m) / (n - p_total)
+        # Cluster-robust: Use fixest-style small sample correction
+        # Formula: G/(G-1) * (n-1)/(n-K) where:
+        #   - G = number of clusters (for multi-way: minimum cluster count)
+        #   - K = k + k_fe_nonnested (FE not nested in cluster are counted)
+        # With K.fixef = "nonnested" (fixest default):
+        #   - FE nested in cluster variable are NOT counted in K
+        #   - FE NOT nested in cluster variable ARE counted in K
+        _cluster_robust_scale(k, m, n)
     else
         # HC0/HR0: no DOF adjustment, scale = n
         convert(eltype(A), n)

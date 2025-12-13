@@ -82,6 +82,13 @@ has_iv(::OLSEstimator) = false
 has_fe(m::OLSEstimator) = has_fe(m.formula)
 dof_fes(m::OLSEstimator) = m.dof_fes
 
+"""
+    has_matrices(m::OLSEstimator) -> Bool
+
+Check if model has stored matrices (X, y, mu). Returns false if fit with save=:minimal.
+"""
+has_matrices(m::OLSEstimator) = m.pp.X !== nothing
+
 # Property accessor for backward compatibility (iterations/converged stored in fes)
 function Base.getproperty(m::OLSEstimator, s::Symbol)
     if s === :iterations
@@ -108,12 +115,26 @@ function StatsAPI.coef(m::OLSEstimator)
 end
 StatsAPI.coefnames(m::OLSEstimator) = m.coefnames
 StatsAPI.responsename(m::OLSEstimator) = m.rr.response_name
-StatsAPI.response(m::OLSEstimator) = m.rr.y
-StatsAPI.fitted(m::OLSEstimator) = m.rr.mu
-StatsAPI.modelmatrix(m::OLSEstimator) = m.pp.X
+
+function StatsAPI.response(m::OLSEstimator)
+    m.rr.y === nothing && error("Response vector not stored. Model was fit with save=:minimal.")
+    return m.rr.y
+end
+
+function StatsAPI.fitted(m::OLSEstimator)
+    m.rr.mu === nothing && error("Fitted values not stored. Model was fit with save=:minimal.")
+    return m.rr.mu
+end
+
+function StatsAPI.modelmatrix(m::OLSEstimator)
+    m.pp.X === nothing && error("Model matrix not stored. Model was fit with save=:minimal.")
+    return m.pp.X
+end
 
 # Residuals (compute from y - mu, unweighted)
 function StatsAPI.residuals(m::OLSEstimator)
+    m.rr.y === nothing && error("Response vector not stored. Model was fit with save=:minimal. Cannot compute residuals.")
+    m.rr.mu === nothing && error("Fitted values not stored. Model was fit with save=:minimal. Cannot compute residuals.")
     resid = m.rr.y .- m.rr.mu
     # Unweight residuals if model was estimated with weights
     if isweighted(m.rr)

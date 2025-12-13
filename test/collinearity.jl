@@ -1,5 +1,6 @@
 using DataFrames, CSV, MetricsLinearModels, Random, Statistics, Test
 using StatsBase: coef, stderror
+using CovarianceMatrices: CR1
 
 @testset "collinearity_with_fixedeffects" begin
 
@@ -31,7 +32,7 @@ using StatsBase: coef, stderror
 
   # test that the collinear coefficient is zero and the standard error is NaN
   @test coef(rr)[1] ≈ 0.0  # Fixed: use coef(rr) function, not rr.coef
-  @test isnan(stderror(:State, :CR1, rr)[1])
+  @test isnan(stderror(CR1(:State), rr)[1])
 
 
 

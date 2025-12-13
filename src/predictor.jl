@@ -3,6 +3,8 @@ Predictor components for OLS estimation.
 
 Similar to GLM.jl's DensePredChol and DensePredQR, these types store
 the model matrix, coefficients, and factorizations for linear regression.
+
+When `save=:minimal` is used, X and X_reduced may be `nothing` to save memory.
 """
 
 abstract type OLSLinearPredictor{T<:AbstractFloat} end
@@ -12,13 +14,18 @@ abstract type OLSLinearPredictor{T<:AbstractFloat} end
 
 OLS predictor using Cholesky factorization of X'X.
 Faster than QR but less numerically stable for ill-conditioned problems.
+
+Fields:
+- `X`: Full model matrix (for public API / post-estimation), nothing if save=:minimal
+- `X_reduced`: Non-collinear columns only, nothing if save=:minimal
+- `beta`: Full coefficient vector (with NaN for collinear)
+- `chol`: Cholesky factorization of X_reduced'X_reduced
 """
 mutable struct OLSPredictorChol{T<:AbstractFloat} <: OLSLinearPredictor{T}
-    X::Matrix{T}                    # Model matrix (post-FE, post-weights)
-    beta::Vector{T}                 # Coefficient estimates
-    chol::Cholesky{T, Matrix{T}}    # Cholesky factorization of X'X
-    delbeta::Vector{T}              # Scratch space for coefficient updates
-    scratchm1::Matrix{T}            # Scratch matrix for computations
+    X::Union{Matrix{T}, Nothing}            # Full model matrix (nothing if save=:minimal)
+    X_reduced::Union{Matrix{T}, Nothing}    # Non-collinear columns only (nothing if save=:minimal)
+    beta::Vector{T}                         # Coefficient estimates (full, with NaN)
+    chol::Cholesky{T, Matrix{T}}            # Cholesky factorization of X_reduced'X_reduced
 end
 
 """
@@ -26,13 +33,18 @@ end
 
 OLS predictor using QR factorization of X.
 More numerically stable than Cholesky but about 2x slower.
+
+Fields:
+- `X`: Full model matrix (for public API / post-estimation), nothing if save=:minimal
+- `X_reduced`: Non-collinear columns only, nothing if save=:minimal
+- `beta`: Full coefficient vector (with NaN for collinear)
+- `qr`: QR factorization of X_reduced
 """
 mutable struct OLSPredictorQR{T<:AbstractFloat} <: OLSLinearPredictor{T}
-    X::Matrix{T}                    # Model matrix
-    beta::Vector{T}                 # Coefficient estimates
-    qr::LinearAlgebra.QRCompactWY{T, Matrix{T}}   # QR factorization
-    delbeta::Vector{T}              # Scratch space
-    scratchm1::Matrix{T}            # Scratch matrix
+    X::Union{Matrix{T}, Nothing}            # Full model matrix (nothing if save=:minimal)
+    X_reduced::Union{Matrix{T}, Nothing}    # Non-collinear columns only (nothing if save=:minimal)
+    beta::Vector{T}                         # Coefficient estimates (full, with NaN)
+    qr::LinearAlgebra.QRCompactWY{T, Matrix{T}}   # QR factorization of X_reduced
 end
 
 """

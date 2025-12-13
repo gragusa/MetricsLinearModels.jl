@@ -27,6 +27,7 @@ function fit_ols(df,
                  dof_add::Integer = 0,
                  method::Symbol = :cpu,
                  factorization::Symbol = :auto,  # NEW: :auto, :chol, or :qr
+                 collinearity::Symbol = :qr,     # :qr or :sweep
                  nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
                  double_precision::Bool = method == :cpu,
                  tol::Real = 1e-6,
@@ -43,6 +44,10 @@ function fit_ols(df,
     factorization in (:auto, :chol, :qr) ||
         throw(ArgumentError("factorization must be :auto, :chol, or :qr, got :$factorization"))
 
+    # Validate collinearity method
+    collinearity in (:qr, :sweep) ||
+        throw(ArgumentError("collinearity must be :qr or :sweep, got :$collinearity"))
+
     # Convert to DataFrame
     df = DataFrame(df; copycols = false)
 
@@ -52,8 +57,12 @@ function fit_ols(df,
 
     data_prep = prepare_data(df, formula, weights, subset, save, drop_singletons, nthreads)
 
-    # Extract cluster variables
-    cluster_data = extract_cluster_variables(df, data_prep.fe_vars, save_cluster, data_prep.esample)
+    # Extract cluster variables (skip for :minimal mode to save memory)
+    if save == :minimal
+        cluster_data = NamedTuple()
+    else
+        cluster_data = extract_cluster_variables(df, data_prep.fe_vars, save_cluster, data_prep.esample)
+    end
 
     # Create subsetted dataframe and weights
     if data_prep.has_weights
@@ -62,9 +71,9 @@ function fit_ols(df,
         wts = uweights(data_prep.nobs)
     end
 
-    subdf = DataFrame((; (x => disallowmissing(view(df[!, x], data_prep.esample))
-                          for x in data_prep.all_vars)...))
-    subfes = FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
+    # Create subsetted dataframe - optimize by checking if disallowmissing is needed
+    subdf = _create_subdf(df, data_prep.all_vars, data_prep.esample)
+    subfes = isempty(data_prep.fes) ? FixedEffect[] : FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
 
     ##############################################################################
     ## Create Model Matrices
@@ -137,25 +146,25 @@ function fit_ols(df,
     end
 
     ##############################################################################
-    ## Build Predictor and Solve
+    ## Build Predictor and Solve (Unified)
     ##############################################################################
 
-    # Build predictor with factorization and solve for coefficients
-    # This also detects collinearity and returns basis_coef
-    pp, basis_coef = build_predictor(X, rr.y, factorization, data_prep.has_intercept)
+    # Determine whether to save matrices (X, y, mu)
+    # :minimal mode discards them to save memory
+    save_matrices = (save != :minimal)
 
-    # Solve for coefficients (updates pp.beta and rr.mu)
-    solve_ols!(rr, pp, basis_coef)
+    # Unified solver: detect collinearity, factorize, and solve in one pass
+    # This avoids redundant matrix subsetting and double-solving
+    pp, basis_coef, _ = fit_ols_core!(rr, X, factorization;
+                                      save_matrices=save_matrices,
+                                      collinearity=collinearity)
 
     ##############################################################################
-    ## Compute Residuals and Statistics
+    ## Compute RSS (without allocating residuals vector)
     ##############################################################################
 
-    # Compute residuals
-    residuals = rr.y .- rr.mu
-
-    # Residual sum of squares
-    rss = sum(abs2, residuals)
+    # Compute RSS directly using SIMD-optimized loop
+    rss = compute_rss(rr.y, rr.mu)
 
     # Degrees of freedom
     ngroups_fes = [nunique(fe) for fe in subfes]
@@ -228,6 +237,16 @@ function fit_ols(df,
     ##############################################################################
 
     coef_names_str = String[string(name) for name in coef_names]
+
+    ##############################################################################
+    ## Clear y/mu if minimal mode (to save memory)
+    ##############################################################################
+
+    if !save_matrices
+        # Clear y and mu from response to save memory
+        rr.y = nothing
+        rr.mu = nothing
+    end
 
     ##############################################################################
     ## Return OLSEstimator

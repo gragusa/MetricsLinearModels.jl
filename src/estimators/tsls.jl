@@ -57,9 +57,9 @@ function fit_tsls(df,
         wts = uweights(data_prep.nobs)
     end
 
-    subdf = DataFrame((; (x => disallowmissing(view(df[!, x], data_prep.esample))
-                          for x in data_prep.all_vars)...))
-    subfes = FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
+    # Create subsetted dataframe - use optimized function
+    subdf = _create_subdf(df, data_prep.all_vars, data_prep.esample)
+    subfes = isempty(data_prep.fes) ? FixedEffect[] : FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
 
     ##############################################################################
     ## Create Model Matrices
@@ -155,71 +155,78 @@ function fit_tsls(df,
 
     perm = nothing
 
-    # First pass: remove collinear variables in Xendo
-    XendoXendo = Xendo' * Xendo
-    basis_endo = basis!(Symmetric(deepcopy(XendoXendo)); has_intercept = false)
+    # First pass: check collinearity within Xendo
+    XendoXendo = compute_crossproduct(Xendo)
+    # Note: basis! modifies its argument, so we need a copy for the first check
+    XendoXendo_check = copy(XendoXendo.data)
+    basis_endo = basis!(Symmetric(XendoXendo_check); has_intercept = false)
     if !all(basis_endo)
         Xendo = Xendo[:, basis_endo]
-        XendoXendo = XendoXendo[basis_endo, basis_endo]
+        XendoXendo = Symmetric(XendoXendo.data[basis_endo, basis_endo])
     end
 
-    # Second pass: remove collinear variables in (Xexo, Z, Xendo) jointly
-    XexoXexo = Xexo' * Xexo
+    # Compute cross-products (using BLAS where beneficial)
+    XexoXexo = compute_crossproduct(Xexo)
+    ZZ = compute_crossproduct(Z)
     XexoZ = Xexo' * Z
     XexoXendo = Xexo' * Xendo
-    ZZ = Z' * Z
     ZXendo = Z' * Xendo
 
-    XexoZXendo = Symmetric(hvcat(3, XexoXexo, XexoZ, XexoXendo,
-                                 zeros(T, size(Z, 2), size(Xexo, 2)), ZZ, ZXendo,
-                                 zeros(T, size(Xendo, 2), size(Xexo, 2)),
-                                 zeros(T, size(Xendo, 2), size(Z, 2)), XendoXendo))
+    # Second pass: joint collinearity check for (Xexo, Z, Xendo)
+    k_exo, k_z, k_endo = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
+    XexoZXendo = build_block_symmetric(
+        [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, XendoXendo.data],
+        [k_exo, k_z, k_endo]
+    )
 
     basis_all = basis!(XexoZXendo; has_intercept = data_prep.has_intercept)
-    basis_Xexo = basis_all[1:size(Xexo, 2)]
-    basis_Z = basis_all[(size(Xexo, 2) + 1):(size(Xexo, 2) + size(Z, 2))]
-    basis_endo_small = basis_all[(size(Xexo, 2) + size(Z, 2) + 1):end]
+    basis_Xexo = basis_all[1:k_exo]
+    basis_Z = basis_all[(k_exo + 1):(k_exo + k_z)]
+    basis_endo_small = basis_all[(k_exo + k_z + 1):end]
 
     # If adding Xexo and Z makes Xendo collinear, recategorize as exogenous
     if !all(basis_endo_small)
         Xexo = hcat(Xexo, Xendo[:, .!basis_endo_small])
         Xendo = Xendo[:, basis_endo_small]
-        XexoXexo = Xexo' * Xexo
+
+        # Recompute cross-products for new Xexo
+        XexoXexo = compute_crossproduct(Xexo)
         XexoZ = Xexo' * Z
         XexoXendo = Xexo' * Xendo
         ZXendo = Z' * Xendo
-        XendoXendo = Xendo' * Xendo
+        XendoXendo = compute_crossproduct(Xendo)
 
         # Track permutation for coefficient reordering
         basis_endo2 = trues(length(basis_endo))
         basis_endo2[basis_endo] = basis_endo_small
-        ans = 1:length(basis_endo)
+        ans = collect(1:length(basis_endo))
         ans = vcat(ans[.!basis_endo2], ans[basis_endo2])
-        perm = vcat(1:length(basis_Xexo), length(basis_Xexo) .+ ans)
+        perm = vcat(1:size(Xexo, 2) - count(.!basis_endo_small), (size(Xexo, 2) - count(.!basis_endo_small)) .+ ans)
 
         out = join(coefnames_endo[.!basis_endo2], " ")
         @info "Endogenous vars collinear with ivs. Recategorized as exogenous: $(out)"
 
         # Third pass after recategorization
-        XexoZXendo = Symmetric(hvcat(3, XexoXexo, XexoZ, XexoXendo,
-                                     zeros(T, size(Z, 2), size(Xexo, 2)), ZZ, ZXendo,
-                                     zeros(T, size(Xendo, 2), size(Xexo, 2)),
-                                     zeros(T, size(Xendo, 2), size(Z, 2)), XendoXendo))
+        k_exo, k_z, k_endo = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
+        XexoZXendo = build_block_symmetric(
+            [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, XendoXendo.data],
+            [k_exo, k_z, k_endo]
+        )
         basis_all = basis!(XexoZXendo; has_intercept = data_prep.has_intercept)
-        basis_Xexo = basis_all[1:size(Xexo, 2)]
-        basis_Z = basis_all[(size(Xexo, 2) + 1):(size(Xexo, 2) + size(Z, 2))]
-        basis_endo_small2 = basis_all[(size(Xexo, 2) + size(Z, 2) + 1):end]
+        basis_Xexo = basis_all[1:k_exo]
+        basis_Z = basis_all[(k_exo + 1):(k_exo + k_z)]
+        basis_endo_small2 = basis_all[(k_exo + k_z + 1):end]
     end
 
     # Apply basis to matrices
     if !all(basis_Xexo)
         Xexo = Xexo[:, basis_Xexo]
-        XexoXexo = XexoXexo[basis_Xexo, basis_Xexo]
+        XexoXexo = Symmetric(XexoXexo.data[basis_Xexo, basis_Xexo])
         XexoXendo = XexoXendo[basis_Xexo, :]
     end
     if !all(basis_Z)
         Z = Z[:, basis_Z]
-        ZZ = ZZ[basis_Z, basis_Z]
+        ZZ = Symmetric(ZZ.data[basis_Z, basis_Z])
         ZXendo = ZXendo[basis_Z, :]
     end
     XexoZ = XexoZ[basis_Xexo, basis_Z]
@@ -238,13 +245,16 @@ function fit_tsls(df,
     ##############################################################################
 
     newZ = hcat(Xexo, Z)
-    newZnewZ = hvcat(2, XexoXexo, XexoZ, XexoZ', ZZ)
+    k_exo_final, k_z_final, k_endo_final = size(Xexo, 2), size(Z, 2), size(Xendo, 2)
     newZXendo = vcat(XexoXendo, ZXendo)
 
-    Pi = ls_solve!(Symmetric(hvcat(2, newZnewZ, newZXendo,
-                                   zeros(T, size(newZXendo')),
-                                   zeros(T, size(Xendo, 2), size(Xendo, 2)))),
-                   size(newZnewZ, 2))
+    # Build augmented system for ls_solve: [newZ'newZ, newZ'Xendo; Xendo'newZ, 0]
+    # Using block symmetric builder (only upper triangle matters for ls_solve!)
+    newZnewZ_aug = build_block_symmetric(
+        [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, zeros(T, k_endo_final, k_endo_final)],
+        [k_exo_final, k_z_final, k_endo_final]
+    )
+    Pi = ls_solve!(newZnewZ_aug, k_exo_final + k_z_final)
 
     # Predicted endogenous variables
     newnewZ = newZ * Pi
@@ -254,18 +264,30 @@ function fit_tsls(df,
     ##############################################################################
 
     Xhat = hcat(Xexo, newnewZ)
-    XhatXhat = Symmetric(hvcat(2, XexoXexo, Xexo' * newnewZ,
-                               zeros(T, size(newnewZ, 2), size(Xexo, 2)), newnewZ' * newnewZ))
+    XexoNewnewZ = Xexo' * newnewZ
+    newnewZnewnewZ = compute_crossproduct(newnewZ)
 
     # Original X with actual endogenous variables (for storing)
     X = hcat(Xexo, Xendo)
 
-    # Solve second-stage regression
-    Xy = Symmetric(hvcat(2, XhatXhat, Xhat' * reshape(y, length(y), 1),
-                         zeros(T, size(Xhat, 2))', [zero(T)]))
-    invsym!(Xy; diagonal = 1:size(Xhat, 2))
-    invXhatXhat = Symmetric(.- Xy[1:(end-1), 1:(end-1)])
-    coef = Xy[1:(end-1), end]
+    # Build augmented system for second stage: [Xhat'Xhat, Xhat'y; y'Xhat, 0]
+    Xhaty = Xhat' * y
+    k_xhat = size(Xhat, 2)
+    XhatXhat_aug = build_block_symmetric(
+        [XexoXexo.data, XexoNewnewZ, reshape(Xhaty[1:k_exo_final], :, 1),
+         newnewZnewnewZ.data, reshape(Xhaty[k_exo_final+1:end], :, 1),
+         zeros(T, 1, 1)],
+        [k_exo_final, k_endo_final, 1]
+    )
+    invsym!(XhatXhat_aug; diagonal = 1:k_xhat)
+    invXhatXhat = Symmetric(.- XhatXhat_aug.data[1:k_xhat, 1:k_xhat])
+    coef = XhatXhat_aug.data[1:k_xhat, end]
+
+    # Also build XhatXhat for storage
+    XhatXhat = build_block_symmetric(
+        [XexoXexo.data, XexoNewnewZ, newnewZnewnewZ.data],
+        [k_exo_final, k_endo_final]
+    )
 
     ##############################################################################
     ## First-Stage F-Statistics (if requested)
@@ -273,26 +295,27 @@ function fit_tsls(df,
 
     F_kp, p_kp = T(NaN), T(NaN)
     if first_stage && size(Xendo, 2) > 0
-        # Prepare residuals for first-stage F-stat
-        # Partial out Xendo w.r.t. (Xexo, Z)
+        # Compute residuals for first-stage F-stat: Xendo - newZ * Pi
         Xendo_res = BLAS.gemm!('N', 'N', -one(T), newZ, Pi, one(T), copy(Xendo))
 
-        # Partial out Z w.r.t. Xexo
-        Pi2 = ls_solve!(Symmetric(hvcat(2, XexoXexo, XexoZ,
-                                        zeros(T, size(Z, 2), size(Xexo, 2)), ZZ)),
-                        size(Xexo, 2))
+        # Partial out Z w.r.t. Xexo using block system
+        XexoZ_aug = build_block_symmetric(
+            [XexoXexo.data, XexoZ, ZZ.data],
+            [k_exo_final, k_z_final]
+        )
+        Pi2 = ls_solve!(XexoZ_aug, k_exo_final)
         Z_res = BLAS.gemm!('N', 'N', -one(T), Xexo, Pi2, one(T), copy(Z))
 
         # Extract the relevant part of Pi (instruments only)
-        Pip = Pi[(size(Xexo, 2) + 1):end, :]
+        Pip = Pi[(k_exo_final + 1):end, :]
 
-        # Compute DOF for fixed effects (needed for first-stage F-stat)
+        # Compute DOF for fixed effects
         dof_fes_local = sum(nunique(fe) for fe in subfes; init=0)
 
         # Compute first-stage F-statistic using Kleibergen-Paap rank test
         F_kp, p_kp = compute_first_stage_fstat(
             Xendo_res, Z_res, Pip,
-            CovarianceMatrices.HR1(),  # Default to homoskedastic for now
+            CovarianceMatrices.HR1(),
             data_prep.nobs,
             size(X, 2),
             dof_fes_local

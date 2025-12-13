@@ -15,6 +15,13 @@
 
 Validate and normalize the save keyword argument.
 Returns a normalized Symbol and a boolean indicating whether residuals should be saved.
+
+Valid options:
+- `:all` or `true`: Save residuals, FE estimates, and model matrices (X, y, mu)
+- `:residuals`: Save residuals and model matrices
+- `:fe`: Save FE estimates and model matrices
+- `:none` or `false`: Don't save residuals or FE estimates, but keep model matrices
+- `:minimal`: Don't store model matrices (X, y, mu) - smallest memory footprint
 """
 function validate_save_keyword(save::Union{Bool, Symbol})
     # Normalize save keyword
@@ -24,8 +31,8 @@ function validate_save_keyword(save::Union{Bool, Symbol})
         save = :none
     end
 
-    if save ∉ (:all, :residuals, :fe, :none)
-        throw(ArgumentError("save keyword must be :all, :none, :residuals, or :fe"))
+    if save ∉ (:all, :residuals, :fe, :none, :minimal)
+        throw(ArgumentError("save keyword must be :all, :none, :residuals, :fe, or :minimal"))
     end
 
     save_residuals = (save == :residuals) | (save == :all)
@@ -172,6 +179,35 @@ function prepare_data(df::DataFrame,
             nobs = nobs,
             nrows = nrows,
             n_singletons = n_singletons)
+end
+
+"""
+    _create_subdf(df, all_vars, esample) -> DataFrame
+
+Create a subsetted DataFrame with only the necessary columns.
+Optimized to avoid unnecessary disallowmissing calls when column already non-missing.
+"""
+function _create_subdf(df::DataFrame,
+                       all_vars::Vector{Symbol},
+                       esample::Union{BitVector, Colon})
+    # Pre-allocate column storage
+    cols = Vector{Any}(undef, length(all_vars))
+
+    @inbounds for (i, x) in enumerate(all_vars)
+        col = df[!, x]
+        # Subset if needed
+        subcol = esample isa Colon ? col : view(col, esample)
+        # Only call disallowmissing if column type includes Missing
+        if eltype(subcol) >: Missing
+            cols[i] = disallowmissing(subcol)
+        else
+            # Already non-missing, just materialize the view
+            cols[i] = collect(subcol)
+        end
+    end
+
+    # Construct DataFrame directly from columns (avoids NamedTuple overhead)
+    return DataFrame(cols, all_vars; copycols=false)
 end
 
 """
