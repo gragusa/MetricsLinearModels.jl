@@ -1,7 +1,6 @@
 
 module MetricsLinearModels
 
-
 using DataFrames
 using FixedEffects
 using LinearAlgebra
@@ -14,7 +13,6 @@ using StatsBase
 using StatsFuns
 @reexport using StatsModels
 using Tables
-
 
 # CovarianceMatrices.jl for post-estimation vcov
 @reexport using CovarianceMatrices
@@ -103,13 +101,14 @@ function esample(m::Union{OLSEstimator, IVEstimator}, v::AbstractVector)
 end
 
 @compile_workload begin
-    df = DataFrame(x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], x2 = [1.0, 2.0, 4.0, 4.0, 3.0, 5.0], y = [3.0, 4.0, 4.0, 5.0, 1.0, 2.0], id = [1, 1, 2, 2, 3, 3])
+    df = DataFrame(
+        x1 = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], x2 = [1.0, 2.0, 4.0, 4.0, 3.0, 5.0],
+        y = [3.0, 4.0, 4.0, 5.0, 1.0, 2.0], id = [1, 1, 2, 2, 3, 3])
     ols(df, @formula(y ~ x1 + x2))
     ols(df, @formula(y ~ x1 + fe(id)))
     # Post-estimation vcov with new API
     model = ols(df, @formula(y ~ x1))
     CovarianceMatrices.vcov(HC1(), model)
 end
-
 
 end

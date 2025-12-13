@@ -8,7 +8,7 @@ function drop_singletons!(esample, fes::Vector{<:FixedEffect}, nthreads)
     nsingletons = 0
     ncleanpasses = 0
     caches = [Vector{UInt8}(undef, fes[i].n) for i in eachindex(fes)]
-    for (fe, cache) in Iterators.cycle(zip(fes,caches))
+    for (fe, cache) in Iterators.cycle(zip(fes, caches))
         n = drop_singletons!(esample, fe, cache)
         nsingletons += n
         if n > 0
@@ -19,7 +19,7 @@ function drop_singletons!(esample, fes::Vector{<:FixedEffect}, nthreads)
             ncleanpasses += 1
         end
         # if the last N-1 passes have not found singletons (where N is number of FE groups), break the loop
-        ncleanpasses >= length(fes) - 1 && break  
+        ncleanpasses >= length(fes) - 1 && break
     end
     return nsingletons
 end
@@ -30,7 +30,7 @@ function drop_singletons!(esample, fe::FixedEffect, cache)
     @inbounds for i in eachindex(esample, refs)  # count obs in each FE group
         if esample[i]
             # no need to keep counting obs after 2 (counters are 8-bit integers)
-            cache[refs[i]] = min(0x02, cache[refs[i]] + 0x01)  
+            cache[refs[i]] = min(0x02, cache[refs[i]] + 0x01)
         end
     end
     n = 0
@@ -42,7 +42,6 @@ function drop_singletons!(esample, fe::FixedEffect, cache)
     end
     return n
 end
-
 
 ##############################################################################
 ##
@@ -58,14 +57,13 @@ function nunique(fe::FixedEffect)
     sum(>(0), out)
 end
 
-
 ##############################################################################
 ##
 ## isnested
 ##
 ##############################################################################
 
-function isnested(fe::FixedEffect, prefs) 
+function isnested(fe::FixedEffect, prefs)
     entries = zeros(eltype(prefs), fe.n)
     @inbounds for (feref, pref) in zip(fe.refs, prefs)
         if entries[feref] == 0

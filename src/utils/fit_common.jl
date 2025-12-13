@@ -67,7 +67,8 @@ Used by predict() to detect unsupported formula structures.
 """
 function is_cont_fe_int(x)
     x isa InteractionTerm || return false
-    any(x -> isa(x, Term), x.terms) && any(x -> isa(x, FunctionTerm{typeof(fe), Vector{Term}}), x.terms)
+    any(x -> isa(x, Term), x.terms) &&
+        any(x -> isa(x, FunctionTerm{typeof(fe), Vector{Term}}), x.terms)
 end
 
 """
@@ -93,13 +94,12 @@ Prepare data for estimation: parse formula, create esample, handle weights, etc.
 Returns a named tuple with all prepared data.
 """
 function prepare_data(df::DataFrame,
-                     formula::FormulaTerm,
-                     weights::Union{Symbol, Nothing},
-                     subset::Union{Nothing, AbstractVector},
-                     save::Symbol,
-                     drop_singletons::Bool,
-                     nthreads::Integer)
-
+        formula::FormulaTerm,
+        weights::Union{Symbol, Nothing},
+        subset::Union{Nothing, AbstractVector},
+        save::Symbol,
+        drop_singletons::Bool,
+        nthreads::Integer)
     nrows = size(df, 1)
 
     # Parse formula components
@@ -122,8 +122,11 @@ function prepare_data(df::DataFrame,
 
     # Remove intercept if absorbed by fixed effects
     if has_fe_intercept
-        formula = FormulaTerm(formula.lhs, tuple(InterceptTerm{false}(),
-                   (term for term in eachterm(formula.rhs) if !isa(term, Union{ConstantTerm,InterceptTerm}))...))
+        formula = FormulaTerm(formula.lhs,
+            tuple(InterceptTerm{false}(),
+                (term
+                for term in eachterm(formula.rhs)
+                if !isa(term, Union{ConstantTerm, InterceptTerm}))...))
     end
     has_intercept = hasintercept(formula)
 
@@ -157,28 +160,28 @@ function prepare_data(df::DataFrame,
     (nobs < nrows) || (esample = Colon())
 
     return (formula = formula,
-            formula_origin = formula_origin,
-            formula_endo = formula_endo,
-            formula_iv = formula_iv,
-            formula_fes = formula_fes,
-            has_iv = has_iv_flag,
-            has_fes = has_fes,
-            has_intercept = has_intercept,
-            has_fe_intercept = has_fe_intercept,
-            has_weights = has_weights_flag,
-            save_fes = save_fes,
-            fes = fes,
-            feids = feids,
-            fekeys = fekeys,
-            exo_vars = exo_vars,
-            iv_vars = iv_vars,
-            endo_vars = endo_vars,
-            fe_vars = fe_vars,
-            all_vars = all_vars,
-            esample = esample,
-            nobs = nobs,
-            nrows = nrows,
-            n_singletons = n_singletons)
+        formula_origin = formula_origin,
+        formula_endo = formula_endo,
+        formula_iv = formula_iv,
+        formula_fes = formula_fes,
+        has_iv = has_iv_flag,
+        has_fes = has_fes,
+        has_intercept = has_intercept,
+        has_fe_intercept = has_fe_intercept,
+        has_weights = has_weights_flag,
+        save_fes = save_fes,
+        fes = fes,
+        feids = feids,
+        fekeys = fekeys,
+        exo_vars = exo_vars,
+        iv_vars = iv_vars,
+        endo_vars = endo_vars,
+        fe_vars = fe_vars,
+        all_vars = all_vars,
+        esample = esample,
+        nobs = nobs,
+        nrows = nrows,
+        n_singletons = n_singletons)
 end
 
 """
@@ -216,9 +219,9 @@ end
 Extract and store cluster variables for post-estimation vcov calculations.
 """
 function extract_cluster_variables(df::DataFrame,
-                                   fe_vars::Vector{Symbol},
-                                   save_cluster::Union{Symbol, Vector{Symbol}, Nothing},
-                                   esample::Union{BitVector, Colon})
+        fe_vars::Vector{Symbol},
+        save_cluster::Union{Symbol, Vector{Symbol}, Nothing},
+        esample::Union{BitVector, Colon})
 
     # Auto-detect cluster variables from fe() terms
     cluster_vars_to_save = copy(fe_vars)
@@ -263,12 +266,12 @@ Create model matrices X, y, Z (instruments), Xendo (endogenous) from the prepare
 Returns a named tuple with matrices and metadata.
 """
 function create_model_matrices(subdf::DataFrame,
-                               formula::FormulaTerm,
-                               formula_endo::FormulaTerm,
-                               formula_iv::FormulaTerm,
-                               contrasts::Dict,
-                               has_iv::Bool,
-                               OLSEstimatorType::Type)
+        formula::FormulaTerm,
+        formula_endo::FormulaTerm,
+        formula_iv::FormulaTerm,
+        contrasts::Dict,
+        has_iv::Bool,
+        OLSEstimatorType::Type)
 
     # Apply schema and create main model matrix
     formula_schema = apply_schema(formula, schema(formula, subdf, contrasts), OLSEstimatorType, false)
@@ -283,32 +286,34 @@ function create_model_matrices(subdf::DataFrame,
 
     if has_iv
         # IV model matrices
-        formula_iv_schema = apply_schema(formula_iv, schema(formula_iv, subdf, contrasts), OLSEstimatorType, false)
+        formula_iv_schema = apply_schema(
+            formula_iv, schema(formula_iv, subdf, contrasts), OLSEstimatorType, false)
         Z = modelmatrix(formula_iv_schema, subdf)
         coef_names_iv = coefnames(formula_iv_schema)
 
-        formula_endo_schema = apply_schema(formula_endo, schema(formula_endo, subdf, contrasts), OLSEstimatorType, false)
+        formula_endo_schema = apply_schema(
+            formula_endo, schema(formula_endo, subdf, contrasts), OLSEstimatorType, false)
         Xendo = modelmatrix(formula_endo_schema, subdf)
         coef_names_endo = coefnames(formula_endo_schema)
 
         return (y = y,
-                Xexo = Xexo,
-                Z = Z,
-                Xendo = Xendo,
-                formula_schema = formula_schema,
-                formula_schema_fe = formula_schema_fe,
-                response_name = response_name,
-                coef_names = coef_names,
-                coef_names_iv = coef_names_iv,
-                coef_names_endo = coef_names_endo)
+            Xexo = Xexo,
+            Z = Z,
+            Xendo = Xendo,
+            formula_schema = formula_schema,
+            formula_schema_fe = formula_schema_fe,
+            response_name = response_name,
+            coef_names = coef_names,
+            coef_names_iv = coef_names_iv,
+            coef_names_endo = coef_names_endo)
     else
         # OLS model matrices
         return (y = y,
-                Xexo = Xexo,
-                formula_schema = formula_schema,
-                formula_schema_fe = formula_schema_fe,
-                response_name = response_name,
-                coef_names = coef_names)
+            Xexo = Xexo,
+            formula_schema = formula_schema,
+            formula_schema_fe = formula_schema_fe,
+            response_name = response_name,
+            coef_names = coef_names)
     end
 end
 
@@ -318,14 +323,14 @@ end
 Create the fixed effects solver object.
 """
 function create_fixed_effect_solver(subfes::Vector{<:FixedEffect},
-                                    weights::AbstractWeights,
-                                    nobs::Int,
-                                    method::Symbol,
-                                    double_precision::Bool,
-                                    nthreads::Integer)
-
+        weights::AbstractWeights,
+        nobs::Int,
+        method::Symbol,
+        double_precision::Bool,
+        nthreads::Integer)
     if length(subfes) > 0
-        feM = AbstractFixedEffectSolver{double_precision ? Float64 : Float32}(subfes, weights, Val{method}, nthreads)
+        feM = AbstractFixedEffectSolver{double_precision ? Float64 : Float32}(
+            subfes, weights, Val{method}, nthreads)
     else
         feM = nothing
     end
@@ -339,21 +344,24 @@ Demean variables with respect to fixed effects in place.
 Returns (y, X, iterations, converged, tss_partial).
 """
 function demean_variables!(y::AbstractVector{T},
-                          X::AbstractMatrix{T},
-                          feM::Union{AbstractFixedEffectSolver, Nothing},
-                          tol::Real,
-                          maxiter::Integer,
-                          progress_bar::Bool) where T
-
+        X::AbstractMatrix{T},
+        feM::Union{AbstractFixedEffectSolver, Nothing},
+        tol::Real,
+        maxiter::Integer,
+        progress_bar::Bool) where {T}
     if feM !== nothing
         oldy = copy(y)
         oldX = copy(X)
 
-        y, b, c = solve_residuals!(y, feM; tol = tol, maxiter = maxiter, progress_bar = progress_bar)
+        y, b,
+        c = solve_residuals!(
+            y, feM; tol = tol, maxiter = maxiter, progress_bar = progress_bar)
         iterations = b
         converged = c
 
-        X, b, c = solve_residuals!(X, feM; tol = tol, maxiter = maxiter, progress_bar = progress_bar)
+        X, b,
+        c = solve_residuals!(
+            X, feM; tol = tol, maxiter = maxiter, progress_bar = progress_bar)
 
         # Compute TSS after partialling out fixed effects
         tss_partial = zero(T)
@@ -380,9 +388,8 @@ end
 Compute total sum of squares, accounting for intercept and weights.
 """
 function compute_tss_total(y::AbstractVector{T},
-                          weights::AbstractWeights,
-                          has_intercept::Bool) where T
-
+        weights::AbstractWeights,
+        has_intercept::Bool) where {T}
     if has_intercept
         return tss(y, weights)
     else
@@ -400,10 +407,10 @@ end
 Compute variance-covariance matrix and F-statistic.
 """
 function compute_vcov_and_fstat(coef::Vector{T},
-                               invXX::Symmetric{T, Matrix{T}},
-                               residuals::AbstractVector{T},
-                               dof_residual::Int,
-                               has_intercept::Bool) where T
+        invXX::Symmetric{T, Matrix{T}},
+        residuals::AbstractVector{T},
+        dof_residual::Int,
+        has_intercept::Bool) where {T}
 
     # Compute variance
     rss_value = zero(T)
@@ -426,23 +433,23 @@ end
 Solve for fixed effects and create augmented dataframe.
 """
 function solve_fixed_effects!(residuals::AbstractVector,
-                             feM::Union{AbstractFixedEffectSolver, Nothing},
-                             oldy::Union{AbstractVector, Nothing},
-                             oldX::Union{AbstractMatrix, Nothing},
-                             coef::Vector,
-                             fekeys::Vector{Symbol},
-                             feids::Vector,
-                             subfes::Vector{<:FixedEffect},
-                             save_fes::Bool,
-                             df::DataFrame,
-                             esample::Union{BitVector, Colon},
-                             nrows::Int,
-                             tol::Real,
-                             maxiter::Integer)
-
+        feM::Union{AbstractFixedEffectSolver, Nothing},
+        oldy::Union{AbstractVector, Nothing},
+        oldX::Union{AbstractMatrix, Nothing},
+        coef::Vector,
+        fekeys::Vector{Symbol},
+        feids::Vector,
+        subfes::Vector{<:FixedEffect},
+        save_fes::Bool,
+        df::DataFrame,
+        esample::Union{BitVector, Colon},
+        nrows::Int,
+        tol::Real,
+        maxiter::Integer)
     augmentdf = DataFrame()
     if save_fes && feM !== nothing
-        newfes, b, c = solve_coefficients!(oldy - oldX * coef, feM; tol = tol, maxiter = maxiter)
+        newfes, b,
+        c = solve_coefficients!(oldy - oldX * coef, feM; tol = tol, maxiter = maxiter)
         for fekey in fekeys
             augmentdf[!, fekey] = df[!, fekey]
         end
@@ -469,18 +476,18 @@ Returns:
 - oldy, oldX: Copies of y and X before demeaning (for FE estimation, if save_fes=true)
 """
 function partial_out_fixed_effects!(cols::Vector,
-                                    colnames::Vector,
-                                    subfes::Vector{<:FixedEffect},
-                                    wts::AbstractWeights,
-                                    method::Symbol,
-                                    nthreads::Integer,
-                                    tol::Real,
-                                    maxiter::Integer,
-                                    progress_bar::Bool,
-                                    save_fes::Bool,
-                                    has_intercept::Bool,
-                                    has_fe_intercept::Bool,
-                                    T::Type)
+        colnames::Vector,
+        subfes::Vector{<:FixedEffect},
+        wts::AbstractWeights,
+        method::Symbol,
+        nthreads::Integer,
+        tol::Real,
+        maxiter::Integer,
+        progress_bar::Bool,
+        save_fes::Bool,
+        has_intercept::Bool,
+        has_fe_intercept::Bool,
+        T::Type)
 
     # Initialize return values
     iterations, converged = 0, true
@@ -503,10 +510,11 @@ function partial_out_fixed_effects!(cols::Vector,
         feM = AbstractFixedEffectSolver{T}(subfes, wts, Val{method}, nthreads)
 
         # Partial out fixed effects
-        _, iterations, convergeds = solve_residuals!(cols, feM;
-                                                     maxiter = maxiter,
-                                                     tol = tol,
-                                                     progress_bar = progress_bar)
+        _, iterations,
+        convergeds = solve_residuals!(cols, feM;
+            maxiter = maxiter,
+            tol = tol,
+            progress_bar = progress_bar)
 
         # Check for collinearity with FEs
         for i in 1:length(cols)
