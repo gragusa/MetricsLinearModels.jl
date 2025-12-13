@@ -30,11 +30,12 @@ Detect collinear columns in design matrix X.
 - `basis::BitVector`: Indicator of non-collinear columns
 - `X_reduced::Matrix{T}`: Matrix with only non-collinear columns
 """
-function detect_collinearity(X::Matrix{T}; tol::Real=1e-8, method::Symbol=:qr) where T<:AbstractFloat
+function detect_collinearity(X::Matrix{T}; tol::Real = 1e-8, method::Symbol = :qr) where {T <:
+                                                                                          AbstractFloat}
     if method == :qr
-        return detect_collinearity_qr(X; tol=tol)
+        return detect_collinearity_qr(X; tol = tol)
     elseif method == :sweep
-        return detect_collinearity_sweep(X; tol=tol)
+        return detect_collinearity_sweep(X; tol = tol)
     else
         throw(ArgumentError("collinearity method must be :qr or :sweep, got :$method"))
     end
@@ -54,7 +55,7 @@ More numerically stable but uses more memory for large n.
 - `basis::BitVector`: Indicator of non-collinear columns
 - `X_reduced::Matrix{T}`: Matrix with only non-collinear columns
 """
-function detect_collinearity_qr(X::Matrix{T}; tol::Real=1e-8) where T<:AbstractFloat
+function detect_collinearity_qr(X::Matrix{T}; tol::Real = 1e-8) where {T <: AbstractFloat}
     n, k = size(X)
 
     # Handle edge case: no columns
@@ -83,7 +84,7 @@ function detect_collinearity_qr(X::Matrix{T}; tol::Real=1e-8) where T<:AbstractF
     basis = trues(k)
     if r < k
         # Mark columns beyond rank as collinear (in permuted order)
-        for j in (r+1):k
+        for j in (r + 1):k
             basis[F.p[j]] = false
         end
     end
@@ -102,7 +103,7 @@ end
 
 Expand reduced coefficient vector to full size with NaN for collinear columns.
 """
-function expand_coef_nan(coef_reduced::Vector{T}, basis::BitVector) where T
+function expand_coef_nan(coef_reduced::Vector{T}, basis::BitVector) where {T}
     k = length(basis)
     coef_full = fill(T(NaN), k)
     coef_full[basis] = coef_reduced
@@ -114,7 +115,7 @@ end
 
 Expand reduced vcov matrix to full size with NaN for collinear columns.
 """
-function expand_vcov_nan(vcov_reduced::Symmetric{T}, basis::BitVector) where T
+function expand_vcov_nan(vcov_reduced::Symmetric{T}, basis::BitVector) where {T}
     k = length(basis)
     vcov_full = fill(T(NaN), k, k)
     vcov_full[basis, basis] = Matrix(vcov_reduced)
@@ -130,7 +131,7 @@ end
 
 Compute X'X efficiently using BLAS syrk (symmetric rank-k update).
 """
-function compute_crossproduct(X::Matrix{T}) where T<:BlasReal
+function compute_crossproduct(X::Matrix{T}) where {T <: BlasReal}
     k = size(X, 2)
     XX = Matrix{T}(undef, k, k)
     BLAS.syrk!('U', 'T', one(T), X, zero(T), XX)
@@ -138,7 +139,7 @@ function compute_crossproduct(X::Matrix{T}) where T<:BlasReal
 end
 
 # Fallback for non-BLAS types
-function compute_crossproduct(X::Matrix{T}) where T
+function compute_crossproduct(X::Matrix{T}) where {T}
     return Symmetric(X' * X)
 end
 
@@ -168,13 +169,13 @@ redundant matrix subsetting and coefficient solving.
 - `beta_reduced::Vector{T}`: Coefficients for non-collinear columns only
 """
 function fit_ols_core!(rr::OLSResponse{T}, X::Matrix{T},
-                       factorization::Symbol;
-                       tol::Real=1e-8,
-                       save_matrices::Bool=true,
-                       collinearity::Symbol=:qr) where T<:AbstractFloat
+        factorization::Symbol;
+        tol::Real = 1e-8,
+        save_matrices::Bool = true,
+        collinearity::Symbol = :qr) where {T <: AbstractFloat}
 
     # Step 1: Detect collinearity and get reduced X (done once)
-    basis_coef, X_reduced = detect_collinearity(X; tol=tol, method=collinearity)
+    basis_coef, X_reduced = detect_collinearity(X; tol = tol, method = collinearity)
 
     # Step 2: Solve based on factorization method
     if factorization == :chol
@@ -192,8 +193,8 @@ end
 Internal Cholesky-based OLS solver.
 """
 function _fit_cholesky!(rr::OLSResponse{T}, X::Matrix{T},
-                        X_reduced::Matrix{T}, basis_coef::BitVector,
-                        save_matrices::Bool) where T
+        X_reduced::Matrix{T}, basis_coef::BitVector,
+        save_matrices::Bool) where {T}
 
     # Compute X'X using BLAS syrk (more efficient than X_reduced' * X_reduced)
     XX = compute_crossproduct(X_reduced)
@@ -223,8 +224,8 @@ end
 Internal QR-based OLS solver.
 """
 function _fit_qr!(rr::OLSResponse{T}, X::Matrix{T},
-                  X_reduced::Matrix{T}, basis_coef::BitVector,
-                  save_matrices::Bool) where T
+        X_reduced::Matrix{T}, basis_coef::BitVector,
+        save_matrices::Bool) where {T}
 
     # QR factorization
     qr_fact = qr(X_reduced)
@@ -259,8 +260,8 @@ Build predictor object with factorization and detect collinearity.
 This is a legacy interface - prefer `fit_ols_core!` for new code.
 """
 function build_predictor(X::Matrix{T}, y::Vector{T},
-                        factorization::Symbol,
-                        has_intercept::Bool) where T<:AbstractFloat
+        factorization::Symbol,
+        has_intercept::Bool) where {T <: AbstractFloat}
     # Create temporary response for unified interface
     rr = OLSResponse(y, zeros(T, length(y)), T[], Symbol("y"))
     pp, basis_coef, _ = fit_ols_core!(rr, X, factorization)
@@ -277,10 +278,12 @@ This is a legacy interface for backward compatibility.
 Note: Requires X_reduced and mu to be stored (not compatible with save=:minimal).
 """
 function solve_ols!(rr::OLSResponse{T},
-                   pp::OLSPredictorChol{T},
-                   basis_coef::BitVector) where T
-    pp.X_reduced === nothing && error("X_reduced not stored. Model was fit with save=:minimal.")
-    rr.mu === nothing && error("Fitted values not stored. Model was fit with save=:minimal.")
+        pp::OLSPredictorChol{T},
+        basis_coef::BitVector) where {T}
+    pp.X_reduced === nothing &&
+        error("X_reduced not stored. Model was fit with save=:minimal.")
+    rr.mu === nothing &&
+        error("Fitted values not stored. Model was fit with save=:minimal.")
     # Coefficients already solved - just recompute fitted values if needed
     beta_reduced = pp.beta[basis_coef]
     mul!(rr.mu, pp.X_reduced, beta_reduced)
@@ -288,10 +291,12 @@ function solve_ols!(rr::OLSResponse{T},
 end
 
 function solve_ols!(rr::OLSResponse{T},
-                   pp::OLSPredictorQR{T},
-                   basis_coef::BitVector) where T
-    pp.X_reduced === nothing && error("X_reduced not stored. Model was fit with save=:minimal.")
-    rr.mu === nothing && error("Fitted values not stored. Model was fit with save=:minimal.")
+        pp::OLSPredictorQR{T},
+        basis_coef::BitVector) where {T}
+    pp.X_reduced === nothing &&
+        error("X_reduced not stored. Model was fit with save=:minimal.")
+    rr.mu === nothing &&
+        error("Fitted values not stored. Model was fit with save=:minimal.")
     beta_reduced = pp.beta[basis_coef]
     mul!(rr.mu, pp.X_reduced, beta_reduced)
     return pp.beta
@@ -306,7 +311,7 @@ end
 
 Compute residual sum of squares without allocating a residuals vector.
 """
-function compute_rss(y::AbstractVector{T}, mu::AbstractVector{T}) where T
+function compute_rss(y::AbstractVector{T}, mu::AbstractVector{T}) where {T}
     rss = zero(T)
     @inbounds @simd for i in eachindex(y, mu)
         rss += (y[i] - mu[i])^2
@@ -319,7 +324,7 @@ end
 
 Compute residuals in-place: residuals = y - mu
 """
-function compute_residuals!(residuals::Vector{T}, y::Vector{T}, mu::Vector{T}) where T
+function compute_residuals!(residuals::Vector{T}, y::Vector{T}, mu::Vector{T}) where {T}
     @inbounds @simd for i in eachindex(residuals, y, mu)
         residuals[i] = y[i] - mu[i]
     end

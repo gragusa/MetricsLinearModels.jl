@@ -118,24 +118,29 @@ StatsAPI.coefnames(m::OLSEstimator) = m.coefnames
 StatsAPI.responsename(m::OLSEstimator) = m.rr.response_name
 
 function StatsAPI.response(m::OLSEstimator)
-    m.rr.y === nothing && error("Response vector not stored. Model was fit with save=:minimal.")
+    m.rr.y === nothing &&
+        error("Response vector not stored. Model was fit with save=:minimal.")
     return m.rr.y
 end
 
 function StatsAPI.fitted(m::OLSEstimator)
-    m.rr.mu === nothing && error("Fitted values not stored. Model was fit with save=:minimal.")
+    m.rr.mu === nothing &&
+        error("Fitted values not stored. Model was fit with save=:minimal.")
     return m.rr.mu
 end
 
 function StatsAPI.modelmatrix(m::OLSEstimator)
-    m.pp.X === nothing && error("Model matrix not stored. Model was fit with save=:minimal.")
+    m.pp.X === nothing &&
+        error("Model matrix not stored. Model was fit with save=:minimal.")
     return m.pp.X
 end
 
 # Residuals (compute from y - mu, unweighted)
 function StatsAPI.residuals(m::OLSEstimator)
-    m.rr.y === nothing && error("Response vector not stored. Model was fit with save=:minimal. Cannot compute residuals.")
-    m.rr.mu === nothing && error("Fitted values not stored. Model was fit with save=:minimal. Cannot compute residuals.")
+    m.rr.y === nothing &&
+        error("Response vector not stored. Model was fit with save=:minimal. Cannot compute residuals.")
+    m.rr.mu === nothing &&
+        error("Fitted values not stored. Model was fit with save=:minimal. Cannot compute residuals.")
     resid = m.rr.y .- m.rr.mu
     # Unweight residuals if model was estimated with weights
     if isweighted(m.rr)

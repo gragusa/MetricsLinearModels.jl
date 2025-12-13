@@ -191,8 +191,8 @@ Create a subsetted DataFrame with only the necessary columns.
 Optimized to avoid unnecessary disallowmissing calls when column already non-missing.
 """
 function _create_subdf(df::DataFrame,
-                       all_vars::Vector{Symbol},
-                       esample::Union{BitVector, Colon})
+        all_vars::Vector{Symbol},
+        esample::Union{BitVector, Colon})
     # Pre-allocate column storage
     cols = Vector{Any}(undef, length(all_vars))
 
@@ -210,7 +210,7 @@ function _create_subdf(df::DataFrame,
     end
 
     # Construct DataFrame directly from columns (avoids NamedTuple overhead)
-    return DataFrame(cols, all_vars; copycols=false)
+    return DataFrame(cols, all_vars; copycols = false)
 end
 
 """

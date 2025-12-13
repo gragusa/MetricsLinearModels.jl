@@ -1,6 +1,5 @@
 const CM = CovarianceMatrices
 
-
 ##############################################################################
 ##
 ## CovarianceMatrices.jl Interface for Post-Estimation vcov
@@ -151,9 +150,10 @@ Returns a tuple of vectors corresponding to the requested cluster symbols.
 """
 function _lookup_cluster_vecs(cluster_syms::Tuple{Vararg{Symbol}}, m::OLSEstimator)
     return Tuple(begin
-        haskey(m.fes.clusters, name) || _cluster_not_found_error(name, m)
-        m.fes.clusters[name]
-    end for name in cluster_syms)
+                     haskey(m.fes.clusters, name) || _cluster_not_found_error(name, m)
+                     m.fes.clusters[name]
+                 end
+    for name in cluster_syms)
 end
 
 """
@@ -168,7 +168,7 @@ vcov(CR0(:firm_id), model)
 vcov(CR0(:firm_id, :year), model)  # multi-way
 ```
 """
-function CM.vcov(v::CM.CR0{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+function CM.vcov(v::CM.CR0{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs(v.g, m)
     return vcov(CM.CR0(cluster_vecs), m)
 end
@@ -185,7 +185,7 @@ vcov(CR1(:firm_id), model)
 vcov(CR1(:firm_id, :year), model)  # multi-way
 ```
 """
-function CM.vcov(v::CM.CR1{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+function CM.vcov(v::CM.CR1{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs(v.g, m)
     return vcov(CM.CR1(cluster_vecs), m)
 end
@@ -195,7 +195,7 @@ end
 
 Compute cluster-robust variance with CR2 (leverage-adjusted) estimator using stored cluster variable(s).
 """
-function CM.vcov(v::CM.CR2{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+function CM.vcov(v::CM.CR2{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs(v.g, m)
     return vcov(CM.CR2(cluster_vecs), m)
 end
@@ -205,7 +205,7 @@ end
 
 Compute cluster-robust variance with CR3 (squared leverage) estimator using stored cluster variable(s).
 """
-function CM.vcov(v::CM.CR3{T}, m::OLSEstimator) where T<:Tuple{Vararg{Symbol}}
+function CM.vcov(v::CM.CR3{T}, m::OLSEstimator) where {T <: Tuple{Vararg{Symbol}}}
     cluster_vecs = _lookup_cluster_vecs(v.g, m)
     return vcov(CM.CR3(cluster_vecs), m)
 end
@@ -230,8 +230,6 @@ function _cluster_not_found_error(cluster_name::Symbol, m::OLSEstimator)
     """)
 end
 
-
-
 """
     bread(m::OLSEstimator)
 
@@ -245,14 +243,14 @@ bread(m::OLSEstimator) = invchol(m.pp)
 Compute leverage values (diagonal of hat matrix H = X(X'X)^(-1)X').
 Uses h_i = ||X_i * U^(-1)||^2 where X'X = U'U for efficiency.
 """
-function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where T
+function leverage(m::OLSEstimator{T, <:OLSPredictorChol}) where {T}
     # For Cholesky: X'X = U'U, so (X'X)^(-1) = U^(-1) * U^(-T)
     # h_i = X_i * U^(-1) * U^(-T) * X_i' = ||X_i * U^(-1)||^2
     X = modelmatrix(m)
     return vec(sum(abs2, X / m.pp.chol.U, dims = 2))
 end
 
-function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where T
+function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where {T}
     # For QR: X = QR, so X(X'X)^(-1)X' = QQ'
     # h_i = ||Q_i||^2
     X = modelmatrix(m)
@@ -260,14 +258,9 @@ function leverage(m::OLSEstimator{T, <:OLSPredictorQR}) where T
     return vec(sum(abs2, Q, dims = 2))
 end
 
-
-
-
-
-
 @noinline residualadjustment(k::CM.HR0, r::OLSEstimator) = 1.0
-@noinline residualadjustment(k::CM.HR1, r::OLSEstimator) = √nobs(r) /√dof_residual(r)
-@noinline residualadjustment(k::CM.HR2, r::OLSEstimator) = 1.0 ./(1 .- leverage(r)) .^ 0.5
+@noinline residualadjustment(k::CM.HR1, r::OLSEstimator) = √nobs(r) / √dof_residual(r)
+@noinline residualadjustment(k::CM.HR2, r::OLSEstimator) = 1.0 ./ (1 .- leverage(r)) .^ 0.5
 @noinline residualadjustment(k::CM.HR3, r::OLSEstimator) = 1.0 ./ (1 .- leverage(r))
 
 @noinline function residualadjustment(k::CM.HR4, r::OLSEstimator)

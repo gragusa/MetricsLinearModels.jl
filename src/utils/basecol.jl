@@ -14,7 +14,7 @@ For a 3x3 block matrix: [A11, A12, A13, A22, A23, A33]
 
 Returns `Symmetric(dest, :U)`.
 """
-function build_block_upper!(dest::Matrix{T}, blocks::Vector, sizes::Vector{Int}) where T
+function build_block_upper!(dest::Matrix{T}, blocks::Vector, sizes::Vector{Int}) where {T}
     n_blocks = length(sizes)
     total = sum(sizes)
     @assert size(dest) == (total, total)
@@ -29,10 +29,10 @@ function build_block_upper!(dest::Matrix{T}, blocks::Vector, sizes::Vector{Int})
             ni, nj = sizes[i], sizes[j]
             if i == j
                 # Diagonal block
-                @views dest[row_offset+1:row_offset+ni, col_offset+1:col_offset+nj] .= block
+                @views dest[(row_offset + 1):(row_offset + ni), (col_offset + 1):(col_offset + nj)] .= block
             else
                 # Off-diagonal block
-                @views dest[row_offset+1:row_offset+ni, col_offset+1:col_offset+nj] .= block
+                @views dest[(row_offset + 1):(row_offset + ni), (col_offset + 1):(col_offset + nj)] .= block
             end
             col_offset += nj
             block_idx += 1
@@ -65,18 +65,18 @@ function invsym!(X::Symmetric; has_intercept = false, setzeros = false, diagonal
     tols = max.(diag(X), 1)
     buffer = zeros(size(X, 1))
     for j in diagonal
-        d = X[j,j]
+        d = X[j, j]
         if setzeros && abs(d) < tols[j] * sqrt(eps())
-            X.data[1:j,j] .= 0
-            X.data[j,(j+1):end] .= 0
+            X.data[1:j, j] .= 0
+            X.data[j, (j + 1):end] .= 0
         else
             # used to mimic SAS; now similar to SweepOperators
             copy!(buffer, view(X, :, j))
             Symmetric(BLAS.syrk!('U', 'N', -1/d, buffer, one(eltype(X)), X.data))
             rmul!(buffer, 1 / d)
-            @views copy!(X.data[1:j-1,j], buffer[1:j-1])
-            @views copy!(X.data[j, j+1:end], buffer[j+1:end])
-            X[j,j] = - 1 / d
+            @views copy!(X.data[1:(j - 1), j], buffer[1:(j - 1)])
+            @views copy!(X.data[j, (j + 1):end], buffer[(j + 1):end])
+            X[j, j] = - 1 / d
         end
         if setzeros && has_intercept && j == 1
             tols = max.(diag(X), 1)
@@ -119,7 +119,7 @@ After sweeping:
 - `basis::BitVector`: true for non-collinear columns
 - `rank::Int`: Number of non-collinear columns
 """
-function sweep_collinear!(A::Matrix{T}, tol::Real=sqrt(eps(T))) where T<:AbstractFloat
+function sweep_collinear!(A::Matrix{T}, tol::Real = sqrt(eps(T))) where {T <: AbstractFloat}
     k = size(A, 1)
     @assert size(A, 2) == k "Matrix must be square"
 
@@ -148,10 +148,10 @@ function sweep_collinear!(A::Matrix{T}, tol::Real=sqrt(eps(T))) where T<:Abstrac
 
             # Update upper triangle: A[i,l] -= A[i,j] * A[j,l] / d
             # Split loops allow better SIMD optimization (fixed ranges)
-            @inbounds for l in (j+1):k
+            @inbounds for l in (j + 1):k
                 A_jl = A[j, l]
                 # Update column l, rows 1 to j-1
-                @simd for i in 1:(j-1)
+                @simd for i in 1:(j - 1)
                     A[i, l] -= A[i, j] * A_jl * inv_d
                 end
                 # Update diagonal and upper of remaining block
@@ -161,12 +161,12 @@ function sweep_collinear!(A::Matrix{T}, tol::Real=sqrt(eps(T))) where T<:Abstrac
             end
 
             # Update row j (becomes -A[j,:]/d after sweep)
-            @simd for l in (j+1):k
+            @simd for l in (j + 1):k
                 A[j, l] *= inv_d
             end
 
             # Update column j above diagonal (becomes -A[:,j]/d)
-            @simd for i in 1:(j-1)
+            @simd for i in 1:(j - 1)
                 A[i, j] *= inv_d
             end
 
@@ -185,7 +185,8 @@ Sweep and solve variant that also handles the augmented system [X'X X'y; y'X y'y
 Returns the basis and modifies A in-place so that A[1:k, k+1:end] contains
 the coefficients for non-collinear columns.
 """
-function sweep_solve!(A::Matrix{T}, k::Int, tol::Real=sqrt(eps(T))) where T<:AbstractFloat
+function sweep_solve!(A::Matrix{T}, k::Int, tol::Real = sqrt(eps(T))) where {T <:
+                                                                             AbstractFloat}
     n = size(A, 1)
     @assert size(A, 2) == n "Matrix must be square"
     @assert k <= n "k must be <= matrix size"
@@ -209,9 +210,9 @@ function sweep_solve!(A::Matrix{T}, k::Int, tol::Real=sqrt(eps(T))) where T<:Abs
             inv_d = one(T) / d
 
             # Sweep the full matrix (including RHS columns)
-            @inbounds for l in (j+1):n
+            @inbounds for l in (j + 1):n
                 A_jl = A[j, l]
-                @simd for i in 1:(j-1)
+                @simd for i in 1:(j - 1)
                     A[i, l] -= A[i, j] * A_jl * inv_d
                 end
                 @simd for i in j:min(l, k)
@@ -219,17 +220,17 @@ function sweep_solve!(A::Matrix{T}, k::Int, tol::Real=sqrt(eps(T))) where T<:Abs
                 end
                 # For RHS columns (l > k), also update rows > k if needed
                 if l > k
-                    @simd for i in (k+1):l
+                    @simd for i in (k + 1):l
                         A[i, l] -= A[i, j] * A_jl * inv_d
                     end
                 end
             end
 
             # Update row and column j
-            @simd for l in (j+1):n
+            @simd for l in (j + 1):n
                 A[j, l] *= inv_d
             end
-            @simd for i in 1:(j-1)
+            @simd for i in 1:(j - 1)
                 A[i, j] *= inv_d
             end
 
@@ -254,7 +255,8 @@ More memory efficient than QR for large n, small k.
 - `basis::BitVector`: Indicator of non-collinear columns
 - `X_reduced::Matrix{T}`: Matrix with only non-collinear columns
 """
-function detect_collinearity_sweep(X::Matrix{T}; tol::Real=1e-8) where T<:AbstractFloat
+function detect_collinearity_sweep(X::Matrix{T}; tol::Real = 1e-8) where {T <:
+                                                                          AbstractFloat}
     n, k = size(X)
 
     # Handle edge cases
@@ -280,14 +282,13 @@ function detect_collinearity_sweep(X::Matrix{T}; tol::Real=1e-8) where T<:Abstra
     return basis, X_reduced
 end
 
-
 #solve X \ y. Take as input the matrix [X'X, X'y
 #                                        y'X, y'y]
 # (but only upper matters)
 function ls_solve!(Xy::Symmetric, nx)
     if nx > 0
         invsym!(Xy, diagonal = 1:nx)
-        return Xy[1:nx, (nx+1):end]
+        return Xy[1:nx, (nx + 1):end]
     else
         return zeros(Float64, 0, size(Xy, 2) - nx)
     end

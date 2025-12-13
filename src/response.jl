@@ -6,7 +6,7 @@ fitted values, and weights for a linear regression model.
 
 When `save=:minimal` is used, `y` and `mu` may be `nothing` to save memory.
 """
-mutable struct OLSResponse{T<:AbstractFloat}
+mutable struct OLSResponse{T <: AbstractFloat}
     y::Union{Vector{T}, Nothing}    # Original response vector (nothing if save=:minimal)
     mu::Union{Vector{T}, Nothing}   # Fitted values ŷ = X*β (nothing if save=:minimal)
     wts::Vector{T}                  # Weights (empty = unweighted)
@@ -30,7 +30,7 @@ Construct an OLSResponse object from response vector, weights, and name.
 - `OLSResponse{T}`: Response object with uninitialized fitted values
 """
 function build_response(y::Vector{T}, wts::AbstractWeights,
-                       response_name::Symbol) where T<:AbstractFloat
+        response_name::Symbol) where {T <: AbstractFloat}
     # Convert weights to vector (or empty for unweighted)
     wts_vec = wts isa UnitWeights ? T[] : convert(Vector{T}, wts.values)
 

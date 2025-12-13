@@ -7,7 +7,7 @@ the model matrix, coefficients, and factorizations for linear regression.
 When `save=:minimal` is used, X and X_reduced may be `nothing` to save memory.
 """
 
-abstract type OLSLinearPredictor{T<:AbstractFloat} end
+abstract type OLSLinearPredictor{T <: AbstractFloat} end
 
 """
     OLSPredictorChol{T}
@@ -21,7 +21,7 @@ Fields:
 - `beta`: Full coefficient vector (with NaN for collinear)
 - `chol`: Cholesky factorization of X_reduced'X_reduced
 """
-mutable struct OLSPredictorChol{T<:AbstractFloat} <: OLSLinearPredictor{T}
+mutable struct OLSPredictorChol{T <: AbstractFloat} <: OLSLinearPredictor{T}
     X::Union{Matrix{T}, Nothing}            # Full model matrix (nothing if save=:minimal)
     X_reduced::Union{Matrix{T}, Nothing}    # Non-collinear columns only (nothing if save=:minimal)
     beta::Vector{T}                         # Coefficient estimates (full, with NaN)
@@ -40,7 +40,7 @@ Fields:
 - `beta`: Full coefficient vector (with NaN for collinear)
 - `qr`: QR factorization of X_reduced
 """
-mutable struct OLSPredictorQR{T<:AbstractFloat} <: OLSLinearPredictor{T}
+mutable struct OLSPredictorQR{T <: AbstractFloat} <: OLSLinearPredictor{T}
     X::Union{Matrix{T}, Nothing}            # Full model matrix (nothing if save=:minimal)
     X_reduced::Union{Matrix{T}, Nothing}    # Non-collinear columns only (nothing if save=:minimal)
     beta::Vector{T}                         # Coefficient estimates (full, with NaN)
@@ -60,7 +60,7 @@ linpred_rank(pp::OLSLinearPredictor) = sum(.!isnan.(pp.beta))
 Compute (X'X)^(-1) from Cholesky factorization.
 This is the "bread" of the sandwich variance estimator.
 """
-function invchol(pp::OLSPredictorChol{T}) where T
+function invchol(pp::OLSPredictorChol{T}) where {T}
     return Symmetric(inv(pp.chol))
 end
 
@@ -70,7 +70,7 @@ end
 Compute (X'X)^(-1) from QR factorization.
 Uses the relationship (X'X)^(-1) = (R'R)^(-1) = R^(-1) R^(-T).
 """
-function invchol(pp::OLSPredictorQR{T}) where T
+function invchol(pp::OLSPredictorQR{T}) where {T}
     R = pp.qr.R
     R_inv = inv(UpperTriangular(R))
     return Symmetric(R_inv * R_inv')
@@ -81,11 +81,11 @@ end
 
 Return X'X for the predictor.
 """
-function coefmatrix(pp::OLSPredictorChol{T}) where T
+function coefmatrix(pp::OLSPredictorChol{T}) where {T}
     return Matrix(pp.chol)
 end
 
-function coefmatrix(pp::OLSPredictorQR{T}) where T
+function coefmatrix(pp::OLSPredictorQR{T}) where {T}
     R = pp.qr.R
     return R' * R
 end

@@ -16,21 +16,21 @@ This function handles the complete TSLS estimation including:
 - First-stage F-statistics
 """
 function fit_tsls(df,
-                  formula::FormulaTerm;
-                  contrasts::Dict = Dict{Symbol, Any}(),
-                  weights::Union{Symbol, Nothing} = nothing,
-                  save::Union{Bool, Symbol} = :residuals,
-                  save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
-                  dof_add::Integer = 0,
-                  method::Symbol = :cpu,
-                  nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
-                  double_precision::Bool = method == :cpu,
-                  tol::Real = 1e-6,
-                  maxiter::Integer = 10000,
-                  drop_singletons::Bool = true,
-                  progress_bar::Bool = true,
-                  subset::Union{Nothing, AbstractVector} = nothing,
-                  first_stage::Bool = true)
+        formula::FormulaTerm;
+        contrasts::Dict = Dict{Symbol, Any}(),
+        weights::Union{Symbol, Nothing} = nothing,
+        save::Union{Bool, Symbol} = :residuals,
+        save_cluster::Union{Symbol, Vector{Symbol}, Nothing} = nothing,
+        dof_add::Integer = 0,
+        method::Symbol = :cpu,
+        nthreads::Integer = method == :cpu ? Threads.nthreads() : 256,
+        double_precision::Bool = method == :cpu,
+        tol::Real = 1e-6,
+        maxiter::Integer = 10000,
+        drop_singletons::Bool = true,
+        progress_bar::Bool = true,
+        subset::Union{Nothing, AbstractVector} = nothing,
+        first_stage::Bool = true)
 
     # Validate save keyword
     save, save_residuals = validate_save_keyword(save)
@@ -59,7 +59,8 @@ function fit_tsls(df,
 
     # Create subsetted dataframe - use optimized function
     subdf = _create_subdf(df, data_prep.all_vars, data_prep.esample)
-    subfes = isempty(data_prep.fes) ? FixedEffect[] : FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
+    subfes = isempty(data_prep.fes) ? FixedEffect[] :
+             FixedEffect[fe[data_prep.esample] for fe in data_prep.fes]
 
     ##############################################################################
     ## Create Model Matrices
@@ -78,22 +79,23 @@ function fit_tsls(df,
 
     # Create endogenous and instrument matrices
     formula_endo_schema = apply_schema(data_prep.formula_endo,
-                                       schema(data_prep.formula_endo, subdf, contrasts),
-                                       StatisticalModel)
+        schema(data_prep.formula_endo, subdf, contrasts),
+        StatisticalModel)
     Xendo = convert(Matrix{T}, modelmatrix(formula_endo_schema, subdf))
     _, coefnames_endo = coefnames(formula_endo_schema)
 
     formula_iv_schema = apply_schema(data_prep.formula_iv,
-                                     schema(data_prep.formula_iv, subdf, contrasts),
-                                     StatisticalModel)
+        schema(data_prep.formula_iv, subdf, contrasts),
+        StatisticalModel)
     Z = convert(Matrix{T}, modelmatrix(formula_iv_schema, subdf))
     _, coefnames_iv = coefnames(formula_iv_schema)
 
     # Modify formula schema for prediction
     formula_schema = FormulaTerm(formula_schema.lhs,
-                                 MatrixTerm(tuple(eachterm(formula_schema.rhs)...,
-                                                  (term for term in eachterm(formula_endo_schema.rhs)
-                                                   if term != ConstantTerm(0))...)))
+        MatrixTerm(tuple(eachterm(formula_schema.rhs)...,
+            (term
+            for term in eachterm(formula_endo_schema.rhs)
+            if term != ConstantTerm(0))...)))
 
     coef_names = vcat(coefnames_exo, coefnames_endo)
 
@@ -103,9 +105,12 @@ function fit_tsls(df,
     # Validate finite values
     all(isfinite, wts) || throw("Weights are not finite")
     all(isfinite, y) || throw("Some observations for the dependent variable are infinite")
-    all(isfinite, Xexo) || throw("Some observations for the exogenous variables are infinite")
-    all(isfinite, Xendo) || throw("Some observations for the endogenous variables are infinite")
-    all(isfinite, Z) || throw("Some observations for the instrumental variables are infinite")
+    all(isfinite, Xexo) ||
+        throw("Some observations for the exogenous variables are infinite")
+    all(isfinite, Xendo) ||
+        throw("Some observations for the endogenous variables are infinite")
+    all(isfinite, Z) ||
+        throw("Some observations for the instrumental variables are infinite")
 
     ##############################################################################
     ## Partial Out Fixed Effects
@@ -120,16 +125,20 @@ function fit_tsls(df,
         colnames = vcat(response_name, coefnames_exo, coefnames_endo, coefnames_iv)
 
         # Partial out fixed effects
-        feM, iterations, converged, tss_partial, oldy_temp, oldX_temp =
-            partial_out_fixed_effects!(cols, colnames, subfes, wts, method, nthreads,
-                                       tol, maxiter, progress_bar, data_prep.save_fes,
-                                       data_prep.has_intercept, data_prep.has_fe_intercept, T)
+        feM, iterations,
+        converged,
+        tss_partial,
+        oldy_temp,
+        oldX_temp = partial_out_fixed_effects!(
+            cols, colnames, subfes, wts, method, nthreads,
+            tol, maxiter, progress_bar, data_prep.save_fes,
+            data_prep.has_intercept, data_prep.has_fe_intercept, T)
 
         # For TSLS, we need to combine Xexo and Xendo for oldX
         if data_prep.save_fes && oldX_temp !== nothing
             # oldX_temp contains all X columns; reconstruct as hcat(Xexo, Xendo)
             n_exo = size(Xexo, 2)
-            oldX = hcat(oldX_temp[:, 1:n_exo], oldX_temp[:, (n_exo+1):(n_exo+size(Xendo, 2))])
+            oldX = hcat(oldX_temp[:, 1:n_exo], oldX_temp[:, (n_exo + 1):(n_exo + size(Xendo, 2))])
             oldy = oldy_temp
         end
     else
@@ -201,7 +210,8 @@ function fit_tsls(df,
         basis_endo2[basis_endo] = basis_endo_small
         ans = collect(1:length(basis_endo))
         ans = vcat(ans[.!basis_endo2], ans[basis_endo2])
-        perm = vcat(1:size(Xexo, 2) - count(.!basis_endo_small), (size(Xexo, 2) - count(.!basis_endo_small)) .+ ans)
+        perm = vcat(1:(size(Xexo, 2) - count(.!basis_endo_small)),
+            (size(Xexo, 2) - count(.!basis_endo_small)) .+ ans)
 
         out = join(coefnames_endo[.!basis_endo2], " ")
         @info "Endogenous vars collinear with ivs. Recategorized as exogenous: $(out)"
@@ -251,7 +261,8 @@ function fit_tsls(df,
     # Build augmented system for ls_solve: [newZ'newZ, newZ'Xendo; Xendo'newZ, 0]
     # Using block symmetric builder (only upper triangle matters for ls_solve!)
     newZnewZ_aug = build_block_symmetric(
-        [XexoXexo.data, XexoZ, XexoXendo, ZZ.data, ZXendo, zeros(T, k_endo_final, k_endo_final)],
+        [XexoXexo.data, XexoZ, XexoXendo, ZZ.data,
+            ZXendo, zeros(T, k_endo_final, k_endo_final)],
         [k_exo_final, k_z_final, k_endo_final]
     )
     Pi = ls_solve!(newZnewZ_aug, k_exo_final + k_z_final)
@@ -275,8 +286,8 @@ function fit_tsls(df,
     k_xhat = size(Xhat, 2)
     XhatXhat_aug = build_block_symmetric(
         [XexoXexo.data, XexoNewnewZ, reshape(Xhaty[1:k_exo_final], :, 1),
-         newnewZnewnewZ.data, reshape(Xhaty[k_exo_final+1:end], :, 1),
-         zeros(T, 1, 1)],
+            newnewZnewnewZ.data, reshape(Xhaty[(k_exo_final + 1):end], :, 1),
+            zeros(T, 1, 1)],
         [k_exo_final, k_endo_final, 1]
     )
     invsym!(XhatXhat_aug; diagonal = 1:k_xhat)
@@ -310,10 +321,11 @@ function fit_tsls(df,
         Pip = Pi[(k_exo_final + 1):end, :]
 
         # Compute DOF for fixed effects
-        dof_fes_local = sum(nunique(fe) for fe in subfes; init=0)
+        dof_fes_local = sum(nunique(fe) for fe in subfes; init = 0)
 
         # Compute first-stage F-statistic using Kleibergen-Paap rank test
-        F_kp, p_kp = compute_first_stage_fstat(
+        F_kp,
+        p_kp = compute_first_stage_fstat(
             Xendo_res, Z_res, Pip,
             CovarianceMatrices.HR1(),
             data_prep.nobs,
@@ -401,8 +413,9 @@ function fit_tsls(df,
     if data_prep.save_fes && oldy !== nothing
         # Use non-NaN coefficients for FE computation
         coef_nonnan = coef[basis_coef]
-        newfes, b, c = solve_coefficients!(oldy - oldX * coef_nonnan, feM;
-                                           tol = tol, maxiter = maxiter)
+        newfes, b,
+        c = solve_coefficients!(oldy - oldX * coef_nonnan, feM;
+            tol = tol, maxiter = maxiter)
         for fekey in data_prep.fekeys
             augmentdf[!, fekey] = df[!, fekey]
         end
@@ -413,7 +426,8 @@ function fit_tsls(df,
     end
 
     # Handle Colon case for esample
-    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) : data_prep.esample
+    esample_final = data_prep.esample == Colon() ? trues(data_prep.nrows) :
+                    data_prep.esample
 
     ##############################################################################
     ## Return IVEstimator
